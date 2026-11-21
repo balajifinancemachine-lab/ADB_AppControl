@@ -10,6 +10,8 @@ import contextlib
 import json
 import logging
 import os
+import shlex
+import sys
 import threading
 import time
 import webbrowser
@@ -259,6 +261,54 @@ def create_app(store_provider=None) -> FastAPI:
         ok, out, err = store.adb_engine.run_adb(["pair", address, code], timeout=20)
         return {"success": ok, "message": (out or err).strip()}
 
+    @app.get("/api/devices/specs")
+    def get_specs():
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if hasattr(engine, "get_device_specs"):
+            specs = engine.get_device_specs(serial=serial)
+        else:
+            specs = {}
+        return {"specs": specs, "serial": serial}
+
+    @app.post("/api/devices/mtp")
+    def open_mtp():
+        store = _get_store()
+        engine = store.adb_engine
+        msg = engine.open_native_mtp_explorer() if hasattr(engine, "open_native_mtp_explorer") else "MTP not supported"
+        return {"success": True, "message": msg}
+
+    @app.post("/api/devices/devmode")
+    def enable_devmode():
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        msg = engine.enable_developer_mode(serial=serial) if hasattr(engine, "enable_developer_mode") else "Developer mode not supported"
+        return {"success": True, "message": msg}
+
+    @app.post("/api/devices/disconnect")
+    def disconnect_device():
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if ":" in serial:
+            engine.run_adb(["disconnect", serial])
+        store.set_current_device(None)
+        return {"success": True, "message": f"Disconnected {serial}"}
+
+    @app.post("/api/devices/acbridge/install")
+    def install_acbridge():
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        msg = engine.install_acbridge(serial=serial) if hasattr(engine, "install_acbridge") else "AC Bridge install not supported"
+        return {"success": "successfully" in msg.lower(), "message": msg}
+
     # ── APPLICATION MANAGEMENT APIS ───────────────────────────────────────────
     @app.get("/api/apps")
     def get_applications(search: str = "", filter_type: str = "all", sort_by: str = "name"):
@@ -486,13 +536,72 @@ def create_app(store_provider=None) -> FastAPI:
         return {"success": ok, "message": msg}
 
     # ── PERMISSIONS APIS ──────────────────────────────────────────────────────
+    @app.get("/api/permissions/list")
+    def get_supported_permissions():
+        perms_dict = {
+            "📷 Camera": "android.permission.CAMERA",
+            "🎤 Microphone": "android.permission.RECORD_AUDIO",
+            "📍 Location (Fine)": "android.permission.ACCESS_FINE_LOCATION",
+            "📍 Location (Coarse)": "android.permission.ACCESS_COARSE_LOCATION",
+            "📞 Phone State": "android.permission.READ_PHONE_STATE",
+            "👥 Contacts (Read)": "android.permission.READ_CONTACTS",
+            "👥 Contacts (Write)": "android.permission.WRITE_CONTACTS",
+            "📅 Calendar": "android.permission.READ_CALENDAR",
+            "📁 Storage (Read)": "android.permission.READ_EXTERNAL_STORAGE",
+            "📁 Storage (Write)": "android.permission.WRITE_EXTERNAL_STORAGE",
+            "📁 All Files Access": "android.permission.MANAGE_EXTERNAL_STORAGE",
+            "💬 SMS Messages": "android.permission.READ_SMS",
+            "📞 Call Log": "android.permission.READ_CALL_LOG",
+            "🖼 Media & Photos": "android.permission.READ_MEDIA_IMAGES",
+            "🎬 Media Video": "android.permission.READ_MEDIA_VIDEO",
+            "🔔 Notifications": "android.permission.POST_NOTIFICATIONS",
+            "📡 Nearby Bluetooth": "android.permission.BLUETOOTH_CONNECT",
+            "🪟 Draw Over Apps": "android.permission.SYSTEM_ALERT_WINDOW",
+            "⚙️ Modify Settings": "android.permission.WRITE_SETTINGS",
+            "📊 Usage Stats Access": "android.permission.PACKAGE_USAGE_STATS",
+            "🔋 Battery Unrestricted": "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+            "🗺️ Background Location": "android.permission.ACCESS_BACKGROUND_LOCATION",
+            "🔢 Phone Numbers": "android.permission.READ_PHONE_NUMBERS",
+        }
+        return {"permissions": perms_dict}
+
+    @app.get("/api/permissions/scan")
+    def scan_permission(perm: str = "android.permission.CAMERA"):
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if hasattr(engine, "scan_all_permissions_for"):
+            data = engine.scan_all_permissions_for(perm, serial=serial)
+        else:
+            data = {"granted": [], "revoked": []}
+        return {"permission": perm, "granted": data.get("granted", []), "revoked": data.get("revoked", [])}
+
+    @app.post("/api/permissions/batch")
+    def batch_permission_change(payload: dict[str, Any]):
+        action = payload.get("action", "grant")
+        perm = payload.get("permission", "")
+        packages = payload.get("packages", [])
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        results = []
+        for pkg in packages:
+            if action == "grant":
+                res = engine.grant_permission(pkg, perm, serial=serial)
+            else:
+                res = engine.revoke_permission(pkg, perm, serial=serial)
+            results.append({"package": pkg, "success": getattr(res, "ok", True), "message": str(res)})
+        return {"success": True, "results": results}
+
     @app.get("/api/permissions")
     def list_permissions():
         store = _get_store()
         engine = store.adb_engine
         cur = store.get_current_device()
         serial = cur.serial if cur else ""
-        perms = engine.scan_runtime_permissions(serial=serial)
+        perms = engine.scan_runtime_permissions(serial=serial) if hasattr(engine, "scan_runtime_permissions") else []
         return {"permissions": perms}
 
     @app.post("/api/permissions/set")
@@ -548,6 +657,81 @@ def create_app(store_provider=None) -> FastAPI:
         )
         return {"success": ok, "message": msg}
 
+    @app.post("/api/screen/tap")
+    def tap_screen(payload: dict[str, int]):
+        x = payload.get("x", 0)
+        y = payload.get("y", 0)
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        ok, out, err = store.adb_engine.run_shell(f"input tap {x} {y}", target_serial=serial)
+        return {"success": ok}
+
+    @app.post("/api/screen/key")
+    def send_keycode(payload: dict[str, Any]):
+        key = payload.get("key", 3)
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        ok, out, err = store.adb_engine.run_shell(f"input keyevent {key}", target_serial=serial)
+        return {"success": ok}
+
+    @app.post("/api/screen/text")
+    def send_device_text(payload: dict[str, str]):
+        text = payload.get("text", "")
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        msg = store.adb_engine.send_text(text, serial=serial) if hasattr(store.adb_engine, "send_text") else ""
+        return {"success": True, "message": msg}
+
+    @app.post("/api/screen/scale")
+    def set_screen_scale(payload: dict[str, Any]):
+        res = payload.get("resolution", "").strip()
+        dpi = payload.get("density", "").strip()
+        reset = payload.get("reset", False)
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if reset:
+            store.adb_engine.set_display_size("", serial=serial)
+            store.adb_engine.set_display_density("", serial=serial)
+            return {"success": True, "message": "Display scaling reset to default"}
+        if res:
+            store.adb_engine.set_display_size(res, serial=serial)
+        if dpi:
+            store.adb_engine.set_display_density(dpi, serial=serial)
+        return {"success": True, "message": f"Applied resolution={res} dpi={dpi}"}
+
+    @app.get("/api/screen/clipboard")
+    def get_clipboard():
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        txt = store.adb_engine.get_clipboard(serial=serial) if hasattr(store.adb_engine, "get_clipboard") else ""
+        return {"clipboard": txt}
+
+    @app.post("/api/screen/clipboard")
+    def set_clipboard(payload: dict[str, str]):
+        txt = payload.get("text", "")
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        msg = store.adb_engine.set_clipboard(txt, serial=serial) if hasattr(store.adb_engine, "set_clipboard") else ""
+        return {"success": True, "message": msg}
+
+    @app.post("/api/screen/record")
+    def record_screen(payload: dict[str, Any]):
+        sec = int(payload.get("seconds", 15))
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        dest_dir = store.adb_engine.get_device_dir("video", serial) if hasattr(store.adb_engine, "get_device_dir") else os.path.join(DATA_DIR, "video")
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, f"record_{int(time.time())}.mp4")
+        msg = store.adb_engine.start_screen_record(sec, dest, serial=serial) if hasattr(store.adb_engine, "start_screen_record") else ""
+        return {"success": True, "message": msg, "saved_path": dest}
+
     # ── FILE EXPLORER & INSTALL APIS ──────────────────────────────────────────
     @app.get("/api/files/list")
     def list_files(path: str = "/sdcard/"):
@@ -581,6 +765,174 @@ def create_app(store_provider=None) -> FastAPI:
         serial = cur.serial if cur else ""
         ok, msg = engine.push_file(local_path, remote_path, serial=serial)
         return {"success": ok, "message": msg}
+
+    @app.post("/api/files/mkdir")
+    def make_directory(payload: dict[str, str]):
+        path = payload.get("path", "").strip()
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        ok, out, err = store.adb_engine.run_shell(f"mkdir -p {shlex.quote(path)}", target_serial=serial)
+        return {"success": ok, "message": (out or err).strip()}
+
+    @app.post("/api/files/delete")
+    def delete_file(payload: dict[str, str]):
+        path = payload.get("path", "").strip()
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        ok, msg = store.adb_engine.delete_remote(path, serial=serial) if hasattr(store.adb_engine, "delete_remote") else (False, "Not supported")
+        return {"success": ok, "message": msg}
+
+    @app.get("/api/rescue/logcat")
+    def get_logcat(lines: int = 200, filter: str = ""):
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        cmd = f"logcat -d -t {lines}"
+        ok, out, err = store.adb_engine.run_shell(cmd, target_serial=serial)
+        raw_lines = out.splitlines() if ok else []
+        if filter:
+            raw_lines = [l for l in raw_lines if filter.lower() in l.lower()]
+        return {"lines": raw_lines[-lines:], "count": len(raw_lines)}
+
+    @app.post("/api/rescue/logcat/clear")
+    def clear_logcat():
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        msg = store.adb_engine.clear_logcat(serial=serial) if hasattr(store.adb_engine, "clear_logcat") else ""
+        return {"success": True, "message": msg}
+
+    @app.post("/api/rescue/bootloop_fix")
+    def run_bootloop_fix(payload: dict[str, str]):
+        fix_type = payload.get("fix_type", "safemode")
+        store = _get_store()
+        if hasattr(store.adb_engine, "bootloop_catch_and_fix"):
+            res = store.adb_engine.bootloop_catch_and_fix(fix_type, timeout_sec=20)
+        else:
+            res = "Bootloop fixer not supported on this engine."
+        return {"success": True, "message": res}
+
+    @app.post("/api/rescue/root_action")
+    def run_root_action(payload: dict[str, str]):
+        action = payload.get("action", "diagnostic")
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if action == "diagnostic":
+            status = store.adb_engine.get_root_status(serial=serial) if hasattr(store.adb_engine, "get_root_status") else "Unknown"
+            return {"success": True, "message": f"Root Status: {status}"}
+        elif action == "magisk":
+            ok, msg = store.adb_engine.install_magisk_app(serial=serial) if hasattr(store.adb_engine, "install_magisk_app") else (False, "Not supported")
+            return {"success": ok, "message": msg}
+        elif action == "one_click_root":
+            ok, msg = store.adb_engine.one_click_root(serial=serial) if hasattr(store.adb_engine, "one_click_root") else (False, "Not supported")
+            return {"success": ok, "message": msg}
+        return {"success": False, "message": f"Unknown root action: {action}"}
+
+    @app.post("/api/rescue/fastboot")
+    def run_fastboot_action(payload: dict[str, Any]):
+        action = payload.get("action", "getvar")
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if action == "getvar":
+            vars_dict = store.adb_engine.get_fastboot_vars(serial=serial) if hasattr(store.adb_engine, "get_fastboot_vars") else {}
+            return {"success": True, "vars": vars_dict}
+        elif action == "switch_slot":
+            slot = payload.get("slot", "a")
+            ok, msg = store.adb_engine.fastboot_switch_slot(slot, serial=serial) if hasattr(store.adb_engine, "fastboot_switch_slot") else (False, "Not supported")
+            return {"success": ok, "message": msg}
+        elif action == "reboot":
+            target = payload.get("target", "system")
+            ok, msg = store.adb_engine.fastboot_reboot_target(target, serial=serial) if hasattr(store.adb_engine, "fastboot_reboot_target") else (False, "Not supported")
+            return {"success": ok, "message": msg}
+        elif action == "wipe":
+            part = payload.get("partition", "cache")
+            ok, msg = store.adb_engine.fastboot_wipe_partition(part, serial=serial) if hasattr(store.adb_engine, "fastboot_wipe_partition") else (False, "Not supported")
+            return {"success": ok, "message": msg}
+        return {"success": False, "message": f"Unknown fastboot action: {action}"}
+
+    @app.post("/api/screen/dpad")
+    def send_dpad_key(payload: dict[str, str]):
+        dpad_map = {
+            "up": 19,
+            "down": 20,
+            "left": 21,
+            "right": 22,
+            "center": 23,
+            "menu": 82,
+            "camera": 27,
+            "back": 4,
+            "home": 3,
+            "recent": 187,
+            "power": 26,
+            "volup": 24,
+            "voldown": 25,
+        }
+        direction = payload.get("direction", "").lower()
+        key = dpad_map.get(direction)
+        if not key:
+            raise HTTPException(status_code=400, detail=f"Invalid direction: {direction}")
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        ok, out, err = store.adb_engine.run_shell(f"input keyevent {key}", target_serial=serial)
+        return {"success": ok, "key": key}
+
+    @app.post("/api/apps/launch")
+    def launch_app(payload: dict[str, str]):
+        pkg = payload.get("package", "").strip()
+        if not pkg:
+            raise HTTPException(status_code=400, detail="Package required")
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        cmd = f"monkey -p {shlex.quote(pkg)} -c android.intent.category.LAUNCHER 1"
+        ok, out, err = store.adb_engine.run_shell(cmd, target_serial=serial)
+        return {"success": ok, "message": out or err}
+
+    @app.post("/api/tools/open_folder")
+    def open_local_folder(payload: dict[str, str]):
+        folder_type = payload.get("type", "backups")
+        if folder_type == "backups":
+            folder_path = os.path.join(DATA_DIR, "backups")
+        elif folder_type == "logs":
+            folder_path = os.path.join(DATA_DIR, "logs")
+        elif folder_type == "models":
+            folder_path = os.path.join(DATA_DIR, "models")
+        else:
+            folder_path = DATA_DIR
+        os.makedirs(folder_path, exist_ok=True)
+        if sys.platform == "win32":
+            os.startfile(folder_path)
+        else:
+            import subprocess
+            subprocess.Popen(["xdg-open", folder_path])
+        return {"success": True, "path": folder_path}
+
+    @app.post("/api/tools/restart_adb")
+    def restart_adb():
+        store = _get_store()
+        ok, msg = store.adb_engine.restart_adb_server() if hasattr(store.adb_engine, "restart_adb_server") else (False, "Not supported")
+        return {"success": ok, "message": msg}
+
+    @app.get("/api/backups")
+    def list_backups():
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        backups = store.adb_engine.scan_all_device_backups(serial=serial) if hasattr(store.adb_engine, "scan_all_device_backups") else []
+        return {"backups": backups, "count": len(backups)}
+
+    @app.post("/api/backups/backup_all")
+    def backup_all_apks():
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        count = store.adb_engine.backup_all_user_apks(serial=serial) if hasattr(store.adb_engine, "backup_all_user_apks") else 0
+        return {"success": True, "count": count, "message": f"Successfully backed up {count} applications"}
 
     # ── JOURNAL & UNDO APIS ───────────────────────────────────────────────────
     @app.get("/api/journal")
