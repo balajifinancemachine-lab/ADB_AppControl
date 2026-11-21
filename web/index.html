@@ -2059,6 +2059,67 @@ footer {
       inp.click();
     }
 
+    // Drag-and-Drop & File Upload Handlers
+    function handleDragOver(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const dz = document.getElementById('apk-dropzone');
+      if (dz) dz.classList.add('dragover');
+    }
+
+    function handleDragLeave(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const dz = document.getElementById('apk-dropzone');
+      if (dz) dz.classList.remove('dragover');
+    }
+
+    function handleFileDrop(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const dz = document.getElementById('apk-dropzone');
+      if (dz) dz.classList.remove('dragover');
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        uploadAndInstallFiles(e.dataTransfer.files);
+      }
+    }
+
+    function handleFileSelect(e) {
+      if (e.target && e.target.files && e.target.files.length > 0) {
+        uploadAndInstallFiles(e.target.files);
+      }
+    }
+
+    async function uploadAndInstallFiles(fileList) {
+      const statusEl = document.getElementById('upload-status');
+      if (statusEl) statusEl.innerText = `Uploading and installing ${fileList.length} package(s)...`;
+
+      const formData = new FormData();
+      for (const file of fileList) {
+        formData.append('files', file);
+      }
+      formData.append('grant_perms', document.getElementById('inst-grant')?.checked ? 'true' : 'false');
+      formData.append('downgrade', document.getElementById('inst-down')?.checked ? 'true' : 'false');
+      formData.append('replace', document.getElementById('inst-reinst')?.checked ? 'true' : 'false');
+      formData.append('test_pkg', document.getElementById('inst-test')?.checked ? 'true' : 'false');
+
+      try {
+        const res = await fetch(`${API_BASE}/api/apps/upload_install`, {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        if (statusEl) {
+          statusEl.innerText = data.results ? `Processed ${data.results.length} files.` : (data.detail || 'Installation finished');
+        }
+        alert('Package installation complete!');
+      } catch (err) {
+        if (statusEl) statusEl.innerText = `Installation failed: ${err.message}`;
+        alert(`Installation error: ${err.message}`);
+      }
+      setTimeout(() => { if (statusEl) statusEl.innerText = ''; loadApps(); }, 3000);
+    }
+
     // Debloat Presets
     async function loadDebloatPreset(name) {
       const res = await fetch(`${API_BASE}/api/debloat/presets`);
@@ -2210,6 +2271,51 @@ footer {
       } else {
         box.innerHTML = '<span style="color:var(--text-muted);">Failed to capture screen.</span>';
       }
+    }
+
+    let gestureStartX = 0;
+    let gestureStartY = 0;
+    let gestureStartTime = 0;
+
+    function startScreenGesture(event) {
+      gestureStartX = event.clientX;
+      gestureStartY = event.clientY;
+      gestureStartTime = Date.now();
+    }
+
+    async function endScreenGesture(event) {
+      const img = document.getElementById('live-shot-img');
+      if (!img) return;
+      const rect = img.getBoundingClientRect();
+      const dx = event.clientX - gestureStartX;
+      const dy = event.clientY - gestureStartY;
+      const dist = Math.hypot(dx, dy);
+      const dur = Date.now() - gestureStartTime;
+
+      if (dist < 15) {
+        // Single Tap
+        const clickX = event.clientX - rect.left;
+        const clickY = event.clientY - rect.top;
+        const x = Math.round((clickX / rect.width) * 1080);
+        const y = Math.round((clickY / rect.height) * 2400);
+        await fetch(`${API_BASE}/api/screen/tap`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ x, y })
+        });
+      } else {
+        // Swipe gesture
+        const x1 = Math.round(((gestureStartX - rect.left) / rect.width) * 1080);
+        const y1 = Math.round(((gestureStartY - rect.top) / rect.height) * 2400);
+        const x2 = Math.round(((event.clientX - rect.left) / rect.width) * 1080);
+        const y2 = Math.round(((event.clientY - rect.top) / rect.height) * 2400);
+        await fetch(`${API_BASE}/api/screen/swipe`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ x1, y1, x2, y2, duration_ms: Math.max(100, Math.min(dur, 1000)) })
+        });
+      }
+      setTimeout(captureScreenshot, 450);
     }
 
     async function handleScreenTap(event) {
@@ -2406,6 +2512,24 @@ footer {
           </td>
         </tr>
       `).join('');
+    }
+
+    async function pullFile(remotePath) {
+      try {
+        const res = await fetch(`${API_BASE}/api/files/pull`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ remote_path: remotePath })
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert(`File successfully downloaded to:\n${data.saved_path}`);
+        } else {
+          alert(`Failed to pull file: ${data.message || 'Unknown error'}`);
+        }
+      } catch (err) {
+        alert(`Error pulling file: ${err.message}`);
+      }
     }
 
     function navigateToPath(p) {
