@@ -5348,6 +5348,8 @@ class ADBEngine:
 
         return parsed
 
+    get_package_details = get_package_details_structured
+
     def show_app_details(self, pkg: str, on_refresh: Callable[[], None] | None = None):
         win = ctk.CTkToplevel()
         win.title(f"Application Inspector — {pkg}")
@@ -6221,8 +6223,9 @@ class ADBEngine:
         return ok, (out or err).strip() or f"Permissions set to {mode}"
 
     # ── SCREEN, INPUT, CLIPBOARD & TWEAKS ─────────────────────────────────────
-    def take_screenshot(self, dest_path: str = "", serial: str = "") -> bool:
+    def take_screenshot(self, dest_path: str = "", serial: str = "", output_path: str = "") -> bool:
         s = self._resolve_serial(serial)
+        dest_path = dest_path or output_path
         if not dest_path:
             dest_path = os.path.join(
                 self.get_device_dir("screenshots", s),
