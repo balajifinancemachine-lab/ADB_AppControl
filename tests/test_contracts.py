@@ -11,6 +11,7 @@ import inspect
 import json
 import os
 import sys
+from typing import Any, ClassVar
 
 import pytest
 
@@ -118,7 +119,7 @@ def test_journal_is_capped(app, tmp_path):
 
 # ── Device-derived regressions (captured from a real SM-G935F on Android 8) ──
 class _StubBase:
-    shell_outputs = {}
+    shell_outputs: ClassVar[dict[str, Any]] = {}
 
 
 def _stub_engine(app, handler):
