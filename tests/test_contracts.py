@@ -671,3 +671,35 @@ def test_ai_brain_engine_on_demand_lifecycle(app, tmp_path):
     engine.stop_server()
     assert engine.is_ready is False
     assert engine._proc is None
+
+
+def test_all_gui_views_build_without_attribute_errors(app):
+    """Verifies all main GUI view containers construct cleanly with no missing widget callbacks."""
+    pytest.importorskip("customtkinter")
+    import customtkinter as ctk
+    root = ctk.CTk()
+    root.withdraw()
+    store = app.AppStateStore(app.AppConfig())
+    try:
+        views = {
+            "apps": app.ApplicationsView(root, store),
+            "brain": app.AIBrainView(root, store),
+            "debloat": app.DebloatView(root, store),
+            "rescue": app.RescueView(root, store),
+            "process": app.ProcessView(root, store),
+            "permissions": app.PermissionsView(root, store),
+            "screen": app.ScreenView(root, store),
+            "install": app.InstallView(root, store),
+            "console": app.ConsoleView(root, store),
+            "settings": app.SettingsView(root, store)
+        }
+        assert len(views) == 10
+        # Check specific InstallView navigation hooks
+        iv = views["install"]
+        assert callable(getattr(iv, "_nav_up", None))
+        assert callable(getattr(iv, "_navigate_up", None))
+        assert hasattr(iv, "fe_path_entry")
+    finally:
+        root.destroy()
+        store.shutdown()
+

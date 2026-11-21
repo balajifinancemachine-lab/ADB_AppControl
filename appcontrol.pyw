@@ -10608,11 +10608,12 @@ class InstallView(ctk.CTkFrame):
         fe_bar.pack(fill="x", padx=10, pady=(8, 4))
         fe_bar.pack_propagate(False)
 
-        ctk.CTkButton(fe_bar, text="📁 .. Up", width=65, height=28, fg_color=("gray75", "gray25"), command=self._nav_up).pack(side="left", padx=(0, 4))
+        ctk.CTkButton(fe_bar, text="📁 .. Up", width=65, height=28, fg_color=("gray75", "gray25"), command=self._navigate_up).pack(side="left", padx=(0, 4))
         self.fe_path_entry = ctk.CTkEntry(fe_bar, font=ctk.CTkFont(family="Consolas", size=11), height=28)
         self.fe_path_entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
         self.fe_path_entry.insert(0, "/sdcard")
         self.fe_path_entry.bind("<Return>", lambda e: self._navigate_to(self.fe_path_entry.get().strip()))
+        self.path_entry = self.fe_path_entry
         ctk.CTkButton(fe_bar, text="Go", width=45, height=28, command=lambda: self._navigate_to(self.fe_path_entry.get().strip())).pack(side="left", padx=(0, 4))
         ctk.CTkButton(fe_bar, text="⟳ Refresh", width=75, height=28, command=self.refresh_file_explorer).pack(side="left", padx=(0, 4))
         ctk.CTkButton(fe_bar, text="📁 New Dir", width=80, height=28, fg_color=("gray75", "gray25"), command=self._mkdir_dialog).pack(side="left", padx=(0, 4))
@@ -10663,10 +10664,15 @@ class InstallView(ctk.CTkFrame):
         parent = os.path.dirname(cur) if cur and cur != "/" else "/"
         self._navigate_to(parent or "/")
 
+    def _nav_up(self):
+        self._navigate_up()
+
     def _navigate_to(self, path: str):
         self.current_remote_dir = path if path.startswith('/') else f"/{path}"
-        self.path_entry.delete(0, 'end')
-        self.path_entry.insert(0, self.current_remote_dir)
+        entry = getattr(self, "fe_path_entry", getattr(self, "path_entry", None))
+        if entry is not None and entry.winfo_exists():
+            entry.delete(0, 'end')
+            entry.insert(0, self.current_remote_dir)
         self.refresh_file_explorer()
 
     def refresh_file_explorer(self):
