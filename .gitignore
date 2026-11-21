@@ -1,0 +1,53 @@
+# ── Runtime data (created by the app at launch, never committed) ──────────────
+data/
+cache/
+backups/
+exports/
+logs/
+screenshots/
+video/
+devices/
+
+# ── Tool payloads downloaded or shipped beside the app ───────────────────────
+tools/adb/
+tools/scrcpy/
+tools/llama/
+tools/models/
+*.gguf
+
+# ── Python / test hygiene ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Virtual Environments & IDEs ──────────────────────────────────────────────
+.venv/
+venv/
+ENV/
+env/
+.idea/
+.serena/
+.vscode/
+.cloud-attachments/
+.freebuff/
+
+# ── Build output ─────────────────────────────────────────────────────────────
+build/
+dist/
+*.manifest
+*.spec.bak
+
+# ── Secrets, databases & temporary files ─────────────────────────────────────
+*.db
+*.db-wal
+*.db-shm
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+.env
+.env.*

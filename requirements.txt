@@ -1,0 +1,9 @@
+# Core GUI runtime (auto-installed on first launch if missing)
+customtkinter>=6.0.0
+pillow>=12.3.0
+
+# Optional: richer APK inspection (package/version/permissions parsing)
+pyaxmlparser>=0.3.31
+
+# Testing & Verification
+pytest>=8.0.0
