@@ -63,11 +63,16 @@ def test_web_server_endpoints(tmp_path, monkeypatch):
     app = create_app(store_provider=lambda: store)
     client = TestClient(app)
 
-    # 1. Frontend HTML
+    # 1. Frontend HTML & CSS
     res = client.get("/")
     assert res.status_code == 200
     assert "ADB AppControl" in res.text
     assert "WEBUI" in res.text
+
+    res_css = client.get("/style.css")
+    assert res_css.status_code == 200
+    assert "text/css" in res_css.headers["content-type"]
+    assert "--bg-main" in res_css.text
 
     # 2. Status API
     res = client.get("/api/status")

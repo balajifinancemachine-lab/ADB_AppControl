@@ -17,7 +17,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response
 
 from app_database import APP_DB
 
@@ -640,7 +640,14 @@ def create_app(store_provider=None) -> FastAPI:
             APP_DB.set_config(k, v)
         return {"success": True}
 
-    # ── SINGLE-PAGE WEBUI FRONTEND (INDEX.HTML) ───────────────────────────────
+    # ── SINGLE-PAGE WEBUI FRONTEND (INDEX.HTML & ASSETS) ─────────────────────
+    @app.get("/style.css")
+    def serve_css():
+        css_file = os.path.join(BASE_DIR, "web", "style.css")
+        if os.path.isfile(css_file):
+            return FileResponse(css_file, media_type="text/css")
+        return HTMLResponse("", status_code=404)
+
     @app.get("/", response_class=HTMLResponse)
     def serve_frontend():
         html_file = os.path.join(BASE_DIR, "web", "index.html")

@@ -4,558 +4,29 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ADB AppControl — Modern Universal Edition</title>
-  <style>
-    :root {
-      --bg-main: #0B0E14;
-      --bg-card: #131822;
-      --bg-hover: #1A212E;
-      --bg-header: #0F131C;
-      --border: rgba(255, 255, 255, 0.12);
-      --border-focus: #3B82F6;
-      --text-primary: #F8FAFC;
-      --text-secondary: #CBD5E1;
-      --text-muted: #94A3B8;
-      --accent-blue: #1D4ED8;
-      --accent-blue-hover: #1E40AF;
-      --accent-green: #047857;
-      --accent-red: #B91C1C;
-      --accent-amber: #B45309;
-      --accent-purple: #6D28D9;
-      --terminal-bg: #07090E;
-      --font-main: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-      --font-mono: "Cascadia Code", "Consolas", "Courier New", monospace;
-    }
-
-    [data-theme="light"] {
-      --bg-main: #F8FAFC;
-      --bg-card: #FFFFFF;
-      --bg-hover: #F1F5F9;
-      --bg-header: #FFFFFF;
-      --border: #CBD5E1;
-      --border-focus: #1D4ED8;
-      --text-primary: #0F172A;
-      --text-secondary: #334155;
-      --text-muted: #475569;
-      --terminal-bg: #0F172A;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      font-family: var(--font-main);
-      background: var(--bg-main);
-      color: var(--text-primary);
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      font-size: 14px;
-    }
-
-    /* ── HEADER ── */
-    header {
-      height: 56px;
-      background: var(--bg-header);
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 16px;
-      flex-shrink: 0;
-      z-index: 20;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-weight: 700;
-      font-size: 16px;
-      letter-spacing: -0.3px;
-    }
-
-    .badge-universal {
-      background: #1D4ED8;
-      color: #FFFFFF;
-      font-size: 11px;
-      font-weight: 800;
-      padding: 3px 8px;
-      border-radius: 4px;
-      letter-spacing: 0.5px;
-    }
-
-    .header-center {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .select-device {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      color: var(--text-primary);
-      padding: 7px 12px;
-      border-radius: 6px;
-      font-size: 12.5px;
-      font-weight: 600;
-      cursor: pointer;
-      outline: none;
-      max-width: 280px;
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 7px 14px;
-      border-radius: 6px;
-      font-size: 12.5px;
-      font-weight: 600;
-      cursor: pointer;
-      border: 1px solid var(--border);
-      background: var(--bg-card);
-      color: var(--text-primary);
-      transition: all 0.15s ease;
-      white-space: nowrap;
-    }
-    .btn:hover {
-      background: var(--bg-hover);
-      border-color: rgba(255,255,255,0.25);
-    }
-    .btn-primary {
-      background: var(--accent-blue);
-      border-color: var(--accent-blue);
-      color: #FFFFFF;
-    }
-    .btn-primary:hover {
-      background: var(--accent-blue-hover);
-    }
-    .btn-success { background: #047857; border-color: #047857; color: #FFFFFF; }
-    .btn-danger { background: #B91C1C; border-color: #B91C1C; color: #FFFFFF; }
-    .btn-amber { background: #B45309; border-color: #B45309; color: #FFFFFF; }
-    .btn-sm { padding: 5px 10px; font-size: 12px; }
-
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 5px 12px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 600;
-      background: rgba(16, 185, 129, 0.15);
-      color: #34D399;
-      border: 1px solid rgba(16, 185, 129, 0.3);
-    }
-
-    /* ── WORKSPACE LAYOUT ── */
-    .workspace {
-      display: flex;
-      flex: 1;
-      overflow: hidden;
-      position: relative;
-    }
-
-    /* ── LEFT NAVIGATION SIDEBAR ── */
-    aside {
-      width: 215px;
-      background: var(--bg-header);
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      flex-shrink: 0;
-      padding: 14px 0;
-      overflow-y: auto;
-    }
-
-    .nav-section-title {
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: var(--text-muted);
-      padding: 10px 18px 6px;
-    }
-
-    .nav-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 18px;
-      color: var(--text-secondary);
-      cursor: pointer;
-      font-weight: 500;
-      font-size: 13px;
-      border-left: 3px solid transparent;
-      transition: all 0.12s ease;
-    }
-    .nav-item:hover {
-      background: var(--bg-hover);
-      color: var(--text-primary);
-    }
-    .nav-item.active {
-      background: rgba(59, 130, 246, 0.15);
-      color: #60A5FA;
-      border-left-color: #60A5FA;
-      font-weight: 600;
-    }
-
-    /* ── MAIN CONTENT VIEW ── */
-    main {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      overflow-y: auto;
-      overflow-x: hidden;
-      padding: 16px;
-      background: var(--bg-main);
-      position: relative;
-    }
-
-    .view-panel {
-      display: none;
-      flex-direction: column;
-      gap: 14px;
-      height: 100%;
-    }
-    .view-panel.active {
-      display: flex;
-    }
-
-    /* ── TOP CONTROLS & CARDS ── */
-    .card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 14px 18px;
-    }
-
-    .toolbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .search-input {
-      background: var(--bg-main);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text-primary);
-      padding: 8px 12px;
-      font-size: 13px;
-      outline: none;
-      width: 240px;
-      transition: border 0.15s ease;
-    }
-    .search-input:focus {
-      border-color: var(--border-focus);
-    }
-
-    .chip-group {
-      display: flex;
-      gap: 4px;
-      background: var(--bg-main);
-      padding: 4px;
-      border-radius: 6px;
-      border: 1px solid var(--border);
-    }
-    .chip {
-      padding: 5px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      transition: all 0.15s ease;
-    }
-    .chip.active {
-      background: var(--bg-card);
-      color: var(--text-primary);
-      font-weight: 600;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-
-    /* ── HIGH PERFORMANCE TABLE (ZERO HORIZONTAL SCROLL) ── */
-    .table-container {
-      flex: 1;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 4px;
-      overflow-y: auto;
-      overflow-x: hidden !important;
-      position: relative;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      table-layout: fixed !important;
-      overflow-x: hidden !important;
-      text-align: left;
-    }
-
-    thead th {
-      position: sticky;
-      top: 0;
-      background: var(--bg-header);
-      padding: 12px 16px;
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--text-muted);
-      border-bottom: 1px solid var(--border);
-      z-index: 5;
-    }
-
-    tbody td {
-      padding: 10px 16px;
-      border-bottom: 1px solid var(--border);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      vertical-align: middle;
-      font-size: 13px;
-    }
-    tbody tr:hover {
-      background: var(--bg-hover);
-    }
-
-    .app-icon {
-      width: 30px;
-      height: 30px;
-      border-radius: 6px;
-      vertical-align: middle;
-      margin-right: 10px;
-      flex-shrink: 0;
-    }
-
-    .pkg-title {
-      font-weight: 600;
-      color: var(--text-primary);
-      font-size: 13px;
-    }
-    .pkg-id {
-      font-size: 12px;
-      color: var(--text-muted);
-      font-family: var(--font-mono);
-    }
-
-    .tag {
-      display: inline-block;
-      padding: 3px 8px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 700;
-    }
-    .tag-sys { background: rgba(139, 92, 246, 0.2); color: #C4B5FD; }
-    .tag-user { background: rgba(59, 130, 246, 0.2); color: #93C5FD; }
-    .tag-dis { background: rgba(239, 68, 68, 0.2); color: #FCA5A5; }
-    .tag-uninst { background: rgba(245, 158, 11, 0.2); color: #FCD34D; }
-    .tag-en { background: rgba(16, 185, 129, 0.2); color: #6EE7B7; }
-
-    /* ── RIGHT LIVE ACTIVITY CONSOLE ── */
-    #live-console {
-      width: 380px;
-      background: var(--bg-header);
-      border-left: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      flex-shrink: 0;
-      transition: width 0.2s ease;
-      z-index: 10;
-    }
-    #live-console.collapsed {
-      width: 38px;
-    }
-    #live-console.collapsed .console-body,
-    #live-console.collapsed .console-footer {
-      display: none;
-    }
-    #live-console.collapsed .console-header-title {
-      writing-mode: vertical-lr;
-      transform: rotate(180deg);
-      margin-top: 15px;
-    }
-
-    .console-header {
-      height: 48px;
-      padding: 8px 14px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .terminal-body {
-      flex: 1;
-      background: var(--terminal-bg);
-      padding: 12px;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      line-height: 1.5;
-      overflow-y: auto;
-      color: #E2E8F0;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-
-    .terminal-line-cmd { color: #38BDF8; font-weight: 600; }
-    .terminal-line-success { color: #4ADE80; }
-    .terminal-line-error { color: #F87171; }
-    .terminal-line-warn { color: #FBBF24; }
-    .terminal-line-info { color: #94A3B8; }
-
-    .terminal-input-bar {
-      padding: 10px 12px;
-      background: var(--bg-card);
-      border-top: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .terminal-input {
-      flex: 1;
-      background: var(--bg-main);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      color: var(--text-primary);
-      padding: 6px 10px;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      outline: none;
-    }
-
-    /* ── MODALS ── */
-    .modal-backdrop {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.6);
-      backdrop-filter: blur(2px);
-      z-index: 100;
-      align-items: center;
-      justify-content: center;
-    }
-    .modal-backdrop.active {
-      display: flex;
-    }
-    .modal-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      width: 580px;
-      max-width: 90vw;
-      max-height: 85vh;
-      display: flex;
-      flex-direction: column;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
-      animation: modalFadeIn 0.15s ease-out;
-    }
-    @keyframes modalFadeIn {
-      from { opacity: 0; transform: scale(0.96); }
-      to { opacity: 1; transform: scale(1); }
-    }
-    .modal-header {
-      padding: 14px 18px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 15px;
-      font-weight: 700;
-    }
-    .modal-body {
-      padding: 16px 18px;
-      overflow-y: auto;
-      flex: 1;
-    }
-    .modal-footer {
-      padding: 14px 18px;
-      border-top: 1px solid var(--border);
-      display: flex;
-      justify-content: flex-end;
-      gap: 10px;
-    }
-
-    /* ── COPILOT CHAT ── */
-    .chat-container {
-      display: flex;
-      flex: 1;
-      gap: 14px;
-      height: 100%;
-    }
-    .chat-pane {
-      flex: 3;
-      display: flex;
-      flex-direction: column;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    .chat-history {
-      flex: 1;
-      padding: 16px;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-    .chat-msg {
-      max-width: 80%;
-      padding: 12px 16px;
-      border-radius: 8px;
-      font-size: 13.5px;
-      line-height: 1.5;
-    }
-    .chat-user {
-      align-self: flex-end;
-      background: var(--accent-blue);
-      color: #FFFFFF;
-    }
-    .chat-ai {
-      align-self: flex-start;
-      background: var(--bg-hover);
-      border: 1px solid var(--border);
-      color: var(--text-primary);
-    }
-    .chat-input-bar {
-      padding: 12px 16px;
-      border-top: 1px solid var(--border);
-      display: flex;
-      gap: 10px;
-    }
-  </style>
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 
   <!-- HEADER -->
   <header>
     <div class="brand">
-      <span style="font-size:18px;">⚡</span>
+      <span class="brand-icon">⚡</span>
       <span>ADB AppControl</span>
       <span class="badge-universal">WEBUI</span>
     </div>
 
     <div class="header-center">
-      <select id="device-select" class="select-device" onchange="onSelectDevice()">
+      <select id="device-select" class="select-device" onchange="onSelectDevice()" title="Select Connected ADB Device" aria-label="Select Connected ADB Device">
         <option value="">Scanning devices...</option>
       </select>
 
       <button class="btn btn-sm" onclick="triggerScan()">🔄 Scan</button>
-      <span id="badge-bridge" class="status-badge" style="display:none;">✔ AC Bridge</span>
-      <span id="badge-ai" class="status-badge" style="color:var(--text-muted); border-color:var(--border);">○ AI: Offline</span>
+      <span id="badge-bridge" class="status-badge d-none">✔ AC Bridge</span>
+      <span id="badge-ai" class="status-badge badge-ai-offline">○ AI: Offline</span>
     </div>
 
-    <div style="display:flex; align-items:center; gap:8px;">
+    <div class="header-actions">
       <button class="btn btn-sm" onclick="openWirelessModal()">📶 Wi-Fi</button>
       <button class="btn btn-sm btn-amber" onclick="openRebootModal()">🔄 Reboot</button>
       <button class="btn btn-sm" onclick="toggleTheme()">🌓 Theme</button>
@@ -590,8 +61,8 @@
       <!-- 1. APPLICATIONS VIEW -->
       <div id="view-apps" class="view-panel active">
         <div class="card toolbar">
-          <div style="display:flex; align-items:center; gap:10px;">
-            <input type="text" id="app-search" class="search-input" placeholder="Search app or package..." oninput="filterApps()">
+          <div class="toolbar-group">
+            <input type="text" id="app-search" class="search-input" placeholder="Search app or package..." title="Search Applications" aria-label="Search Applications" oninput="filterApps()">
             <div class="chip-group">
               <div class="chip active" onclick="setAppFilter('all', this)">All (<span id="cnt-all">0</span>)</div>
               <div class="chip" onclick="setAppFilter('user', this)">User (<span id="cnt-user">0</span>)</div>
@@ -601,7 +72,7 @@
             </div>
           </div>
 
-          <div style="display:flex; align-items:center; gap:6px;">
+          <div class="toolbar-actions">
             <button class="btn btn-sm btn-danger" onclick="executeBatchAction('uninstall')">🗑 Uninstall</button>
             <button class="btn btn-sm btn-amber" onclick="executeBatchAction('disable')">⏸ Disable</button>
             <button class="btn btn-sm btn-success" onclick="executeBatchAction('enable')">▶ Enable</button>
@@ -615,17 +86,17 @@
           <table id="apps-table">
             <thead>
               <tr>
-                <th style="width:38px;"><input type="checkbox" onchange="toggleSelectAll(this.checked)"></th>
-                <th style="width:50px;">App</th>
+                <th class="col-select"><input type="checkbox" onchange="toggleSelectAll(this.checked)" title="Select all applications" aria-label="Select all applications"></th>
+                <th class="col-icon">App</th>
                 <th>Application Name & Package</th>
-                <th style="width:110px;">Version</th>
-                <th style="width:90px;">Type</th>
-                <th style="width:90px;">Status</th>
-                <th style="width:90px; text-align:center;">Actions</th>
+                <th class="col-md">Version</th>
+                <th class="col-sm">Type</th>
+                <th class="col-sm">Status</th>
+                <th class="col-sm action-col">Actions</th>
               </tr>
             </thead>
             <tbody id="apps-table-body">
-              <tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted);">Connect a device to inspect installed applications.</td></tr>
+              <tr><td colspan="7" class="empty-table-cell">Connect a device to inspect installed applications.</td></tr>
             </tbody>
           </table>
         </div>
@@ -635,10 +106,10 @@
       <div id="view-debloat" class="view-panel">
         <div class="card toolbar">
           <div>
-            <h3 style="font-size:15px; font-weight:700;">🧹 Smart Debloat Wizard</h3>
-            <p style="color:var(--text-muted); font-size:12.5px;">1-Click safe OEM bloatware removal, battery optimization & telemetry cleaner.</p>
+            <h3 class="view-header-title">🧹 Smart Debloat Wizard</h3>
+            <p class="view-header-desc">1-Click safe OEM bloatware removal, battery optimization & telemetry cleaner.</p>
           </div>
-          <div style="display:flex; gap:8px;">
+          <div class="flex-row-gap-8">
             <button class="btn btn-sm btn-primary" onclick="loadDebloatPreset('samsung')">Samsung Safe</button>
             <button class="btn btn-sm btn-primary" onclick="loadDebloatPreset('xiaomi')">Xiaomi / MIUI</button>
             <button class="btn btn-sm btn-primary" onclick="loadDebloatPreset('google')">Google Telemetry</button>
@@ -649,15 +120,15 @@
           <table>
             <thead>
               <tr>
-                <th style="width:38px;"><input type="checkbox"></th>
+                <th class="col-select"><input type="checkbox" title="Select all debloat items" aria-label="Select all debloat items"></th>
                 <th>Package Name</th>
                 <th>Description</th>
-                <th style="width:110px;">Safety Level</th>
-                <th style="width:130px;">Recommendation</th>
+                <th class="col-md">Safety Level</th>
+                <th class="col-xl">Recommendation</th>
               </tr>
             </thead>
             <tbody id="debloat-table-body">
-              <tr><td colspan="5" style="text-align:center; padding:30px; color:var(--text-muted);">Select a debloat preset above to scan bloatware.</td></tr>
+              <tr><td colspan="5" class="empty-table-cell">Select a debloat preset above to scan bloatware.</td></tr>
             </tbody>
           </table>
         </div>
@@ -667,10 +138,10 @@
       <div id="view-process" class="view-panel">
         <div class="card toolbar">
           <div>
-            <h3 style="font-size:15px; font-weight:700;">⚡ Real-Time Process Monitor</h3>
-            <p style="color:var(--text-muted); font-size:12.5px;">Inspect memory consumption, CPU load, and optimize background services.</p>
+            <h3 class="view-header-title">⚡ Real-Time Process Monitor</h3>
+            <p class="view-header-desc">Inspect memory consumption, CPU load, and optimize background services.</p>
           </div>
-          <div style="display:flex; gap:8px;">
+          <div class="flex-row-gap-8">
             <button class="btn btn-sm btn-success" onclick="trimRam()">🧠 Trim RAM</button>
             <button class="btn btn-sm" onclick="loadProcesses()">🔄 Refresh</button>
           </div>
@@ -679,16 +150,16 @@
           <table>
             <thead>
               <tr>
-                <th style="width:80px;">PID</th>
-                <th style="width:120px;">User</th>
-                <th style="width:90px;">CPU %</th>
-                <th style="width:110px;">RAM (RSS)</th>
+                <th class="col-pid">PID</th>
+                <th class="col-user">User</th>
+                <th class="col-sm">CPU %</th>
+                <th class="col-md">RAM (RSS)</th>
                 <th>Process / Package</th>
-                <th style="width:90px; text-align:center;">Action</th>
+                <th class="col-sm action-col">Action</th>
               </tr>
             </thead>
             <tbody id="process-table-body">
-              <tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text-muted);">Click Refresh to read running processes.</td></tr>
+              <tr><td colspan="6" class="empty-table-cell">Click Refresh to read running processes.</td></tr>
             </tbody>
           </table>
         </div>
@@ -698,45 +169,45 @@
       <div id="view-permissions" class="view-panel">
         <div class="card toolbar">
           <div>
-            <h3 style="font-size:15px; font-weight:700;">🛡 Runtime Permissions Auditor</h3>
-            <p style="color:var(--text-muted); font-size:12.5px;">Inspect and toggle sensitive Android hardware permissions.</p>
+            <h3 class="view-header-title">🛡 Runtime Permissions Auditor</h3>
+            <p class="view-header-desc">Inspect and toggle sensitive Android hardware permissions.</p>
           </div>
           <button class="btn btn-sm" onclick="loadPermissions()">🔄 Refresh</button>
         </div>
         <div class="table-container" id="permissions-container">
-          <div style="padding:30px; text-align:center; color:var(--text-muted);">Click Refresh to load permissions audit.</div>
+          <div class="empty-table-cell">Click Refresh to load permissions audit.</div>
         </div>
       </div>
 
       <!-- 5. SCREEN & REMOTE VIEW -->
       <div id="view-screen" class="view-panel">
-        <div style="display:flex; gap:16px; height:100%;">
-          <div class="card" style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;">
-            <div id="screen-preview-box" style="max-height:540px; display:flex; align-items:center; justify-content:center; background:#000; border-radius:8px; overflow:hidden;">
-              <span style="color:var(--text-muted); padding:40px;">No screenshot captured yet.</span>
+        <div class="screen-container">
+          <div class="card screen-preview-card">
+            <div id="screen-preview-box" class="screen-preview-box">
+              <span class="screen-preview-placeholder">No screenshot captured yet.</span>
             </div>
-            <div style="display:flex; gap:8px; margin-top:12px;">
+            <div class="screen-controls">
               <button class="btn btn-primary" onclick="captureScreenshot()">📸 Capture Screen</button>
               <button class="btn" onclick="copyScreenshotClipboard()">📋 Copy</button>
             </div>
           </div>
-          <div class="card" style="width:340px; display:flex; flex-direction:column; gap:14px;">
-            <h3 style="font-size:15px; font-weight:700;">📺 Scrcpy Display Mirroring</h3>
-            <p style="color:var(--text-muted); font-size:12.5px;">Control your phone in real-time with ultra-low latency.</p>
-            <label style="font-size:12.5px; font-weight:600;">Resolution:</label>
-            <select id="scrcpy-res" class="select-device" style="max-width:100%;">
+          <div class="card scrcpy-panel">
+            <h3 class="view-header-title">📺 Scrcpy Display Mirroring</h3>
+            <p class="view-header-desc">Control your phone in real-time with ultra-low latency.</p>
+            <label class="form-label" for="scrcpy-res">Resolution:</label>
+            <select id="scrcpy-res" class="select-device max-w-full" title="Screen Mirror Resolution" aria-label="Screen Mirror Resolution">
               <option value="">Default (Native)</option>
               <option value="1080">1080p</option>
               <option value="720">720p</option>
             </select>
-            <label style="font-size:12.5px; font-weight:600;">Bitrate:</label>
-            <select id="scrcpy-bitrate" class="select-device" style="max-width:100%;">
+            <label class="form-label" for="scrcpy-bitrate">Bitrate:</label>
+            <select id="scrcpy-bitrate" class="select-device max-w-full" title="Screen Mirror Bitrate" aria-label="Screen Mirror Bitrate">
               <option value="8M">8 Mbps (Recommended)</option>
               <option value="16M">16 Mbps (High Quality)</option>
               <option value="4M">4 Mbps (Smooth)</option>
             </select>
-            <div style="margin-top:auto;">
-              <button class="btn btn-primary" style="width:100%; justify-content:center;" onclick="launchScrcpy()">▶ Start Mirroring</button>
+            <div class="mt-auto">
+              <button class="btn btn-primary btn-block" onclick="launchScrcpy()">▶ Start Mirroring</button>
             </div>
           </div>
         </div>
@@ -745,9 +216,9 @@
       <!-- 6. INSTALL & FILES VIEW -->
       <div id="view-files" class="view-panel">
         <div class="card toolbar">
-          <div style="display:flex; align-items:center; gap:8px;">
-            <span style="font-weight:700;">Path:</span>
-            <input type="text" id="file-path-input" class="search-input" value="/sdcard/" style="width:320px;">
+          <div class="header-actions">
+            <span class="text-bold">Path:</span>
+            <input type="text" id="file-path-input" class="search-input file-path-input" value="/sdcard/" title="Remote File Path" aria-label="Remote File Path" placeholder="/sdcard/">
             <button class="btn btn-sm" onclick="navigateFiles()">Go</button>
           </div>
         </div>
@@ -756,13 +227,13 @@
             <thead>
               <tr>
                 <th>File / Folder Name</th>
-                <th style="width:110px;">Size</th>
-                <th style="width:120px;">Permissions</th>
-                <th style="width:100px; text-align:center;">Action</th>
+                <th class="col-md">Size</th>
+                <th class="col-lg">Permissions</th>
+                <th class="col-md action-col">Action</th>
               </tr>
             </thead>
             <tbody id="files-table-body">
-              <tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-muted);">Navigate to load remote filesystem.</td></tr>
+              <tr><td colspan="4" class="empty-table-cell">Navigate to load remote filesystem.</td></tr>
             </tbody>
           </table>
         </div>
@@ -771,9 +242,9 @@
       <!-- 7. RESCUE & UNBRICK VIEW -->
       <div id="view-rescue" class="view-panel">
         <div class="card">
-          <h3 style="font-size:15px; font-weight:700; margin-bottom:6px;">🔧 Hardware Recovery & Fastboot Flasher</h3>
-          <p style="color:var(--text-muted); font-size:12.5px; margin-bottom:14px;">One-click boot commands for unbricking and custom ROM / partition flashing.</p>
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <h3 class="view-header-title mb-6">🔧 Hardware Recovery & Fastboot Flasher</h3>
+          <p class="view-header-desc mb-14">One-click boot commands for unbricking and custom ROM / partition flashing.</p>
+          <div class="recovery-actions">
             <button class="btn btn-amber" onclick="rebootTarget('recovery')">🔄 Reboot to Recovery</button>
             <button class="btn btn-danger" onclick="rebootTarget('bootloader')">⚡ Reboot to Bootloader</button>
             <button class="btn btn-danger" onclick="rebootTarget('edl')">🛑 Reboot to Qualcomm EDL</button>
@@ -787,15 +258,15 @@
       <div id="view-copilot" class="view-panel">
         <div class="chat-container">
           <div class="chat-pane">
-            <div style="padding:12px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
-              <span style="font-weight:700; font-size:15px;">🧠 Gemma 4B Conversational Copilot</span>
+            <div class="chat-header">
+              <span class="chat-header-title">🧠 Gemma 4B Conversational Copilot</span>
               <button id="btn-toggle-model" class="btn btn-sm btn-success" onclick="toggleAIModel()">▶ Start Model</button>
             </div>
             <div id="chat-history" class="chat-history">
               <div class="chat-msg chat-ai">Hello! I am your local ADB AppControl Copilot. Ask me about bloatware, safety of any package, battery diagnostics, or tell me to run actions like "Take a screenshot" or "Uninstall com.example.app".</div>
             </div>
             <div class="chat-input-bar">
-              <input type="text" id="chat-input" class="search-input" style="flex:1;" placeholder="Ask Gemma or give a command..." onkeydown="if(event.key==='Enter') sendChatMessage()">
+              <input type="text" id="chat-input" class="search-input chat-input-field" placeholder="Ask Gemma or give a command..." title="Copilot Command Input" aria-label="Copilot Command Input" onkeydown="if(event.key==='Enter') sendChatMessage()">
               <button class="btn btn-primary" onclick="sendChatMessage()">Send</button>
             </div>
           </div>
@@ -806,8 +277,8 @@
       <div id="view-journal" class="view-panel">
         <div class="card toolbar">
           <div>
-            <h3 style="font-size:15px; font-weight:700;">📜 Mutation Safety Journal</h3>
-            <p style="color:var(--text-muted); font-size:12.5px;">Persistent SQLite rollback journal. 1-Click undo for all disabled or uninstalled packages.</p>
+            <h3 class="view-header-title">📜 Mutation Safety Journal</h3>
+            <p class="view-header-desc">Persistent SQLite rollback journal. 1-Click undo for all disabled or uninstalled packages.</p>
           </div>
           <button class="btn btn-sm" onclick="loadJournal()">🔄 Refresh</button>
         </div>
@@ -815,15 +286,15 @@
           <table>
             <thead>
               <tr>
-                <th style="width:140px;">Timestamp</th>
-                <th style="width:90px;">Action</th>
+                <th class="col-time">Timestamp</th>
+                <th class="col-sm">Action</th>
                 <th>Package Name</th>
                 <th>Undo Command</th>
-                <th style="width:90px; text-align:center;">Rollback</th>
+                <th class="col-sm action-col">Rollback</th>
               </tr>
             </thead>
             <tbody id="journal-table-body">
-              <tr><td colspan="5" style="text-align:center; padding:30px; color:var(--text-muted);">No mutations recorded yet.</td></tr>
+              <tr><td colspan="5" class="empty-table-cell">No mutations recorded yet.</td></tr>
             </tbody>
           </table>
         </div>
@@ -831,16 +302,16 @@
 
       <!-- 10. SETTINGS VIEW -->
       <div id="view-settings" class="view-panel">
-        <div class="card" style="max-width:600px; display:flex; flex-direction:column; gap:14px;">
-          <h3 style="font-size:15px; font-weight:700;">⚙️ Application Settings</h3>
-          <p style="color:var(--text-muted); font-size:12.5px;">Backed by atomic SQLite WAL mode in <code>data/appcontrol.db</code>.</p>
-          <label style="font-weight:600; font-size:13px;">Theme:</label>
-          <select id="cfg-theme" class="select-device" onchange="toggleTheme()">
+        <div class="card settings-card">
+          <h3 class="view-header-title">⚙️ Application Settings</h3>
+          <p class="view-header-desc">Backed by atomic SQLite WAL mode in <code>data/appcontrol.db</code>.</p>
+          <label class="form-label" for="cfg-theme">Theme:</label>
+          <select id="cfg-theme" class="select-device" onchange="toggleTheme()" title="Select Theme" aria-label="Select Theme">
             <option value="dark">Dark Theme (Fintech Sleek)</option>
             <option value="light">Light Theme</option>
           </select>
-          <label style="font-weight:600; font-size:13px;">Database Engine:</label>
-          <div style="color:#34D399; font-weight:600; font-size:13px;">✔ SQLite 3 WAL Mode Active (data/appcontrol.db)</div>
+          <label class="form-label">Database Engine:</label>
+          <div class="db-status-ok">✔ SQLite 3 WAL Mode Active (data/appcontrol.db)</div>
         </div>
       </div>
 
@@ -849,8 +320,8 @@
     <!-- RIGHT LIVE ACTIVITY CONSOLE (DOCK) -->
     <div id="live-console">
       <div class="console-header">
-        <span class="console-header-title" style="font-weight:700; font-size:12px; letter-spacing:0.5px;">⚡ LIVE CONSOLE</span>
-        <div style="display:flex; gap:6px;">
+        <span class="console-header-title">⚡ LIVE CONSOLE</span>
+        <div class="console-btn-group">
           <button class="btn btn-sm" onclick="copyConsole()">📋</button>
           <button class="btn btn-sm" onclick="clearConsole()">🗑</button>
           <button class="btn btn-sm" onclick="toggleConsole()">▶</button>
@@ -863,8 +334,8 @@
       </div>
 
       <div class="terminal-input-bar">
-        <span style="color:#38BDF8; font-weight:bold; font-family:var(--font-mono); font-size:13px;">$</span>
-        <input type="text" id="terminal-cmd-input" class="terminal-input" placeholder="adb shell command..." onkeydown="if(event.key==='Enter') runQuickCommand()">
+        <span class="terminal-prompt-sym">$</span>
+        <input type="text" id="terminal-cmd-input" class="terminal-input" placeholder="adb shell command..." title="Terminal Command Input" aria-label="Terminal Command Input" onkeydown="if(event.key==='Enter') runQuickCommand()">
         <button class="btn btn-sm btn-primary" onclick="runQuickCommand()">Run</button>
       </div>
     </div>
@@ -878,11 +349,11 @@
         <span>📶 Connect Wireless Debugging</span>
         <button class="btn btn-sm" onclick="closeWirelessModal()">✖</button>
       </div>
-      <div class="modal-body" style="display:flex; flex-direction:column; gap:12px;">
-        <label style="font-weight:600; font-size:13px;">IP Address & Port (e.g. 192.168.1.50:5555):</label>
-        <input type="text" id="wireless-ip" class="search-input" style="width:100%;" placeholder="192.168.1.x:5555">
-        <label style="font-weight:600; font-size:13px;">Pairing Code (Android 11+ optional):</label>
-        <input type="text" id="wireless-code" class="search-input" style="width:100%;" placeholder="6-digit pairing code">
+      <div class="modal-body modal-form">
+        <label class="form-label" for="wireless-ip">IP Address & Port (e.g. 192.168.1.50:5555):</label>
+        <input type="text" id="wireless-ip" class="search-input w-full" placeholder="192.168.1.x:5555" title="Device IP and Port" aria-label="Device IP and Port">
+        <label class="form-label" for="wireless-code">Pairing Code (Android 11+ optional):</label>
+        <input type="text" id="wireless-code" class="search-input w-full" placeholder="6-digit pairing code" title="Wireless Pairing Code" aria-label="Wireless Pairing Code">
       </div>
       <div class="modal-footer">
         <button class="btn" onclick="closeWirelessModal()">Cancel</button>
@@ -1044,7 +515,7 @@
     function renderAppsTable(apps) {
       const tbody = document.getElementById('apps-table-body');
       if (!apps || apps.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted);">No applications found.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-table-cell">No applications found.</td></tr>';
         return;
       }
       tbody.innerHTML = apps.map(a => `
@@ -1055,10 +526,10 @@
             <div class="pkg-title">${escapeHtml(a.name || a.package)}</div>
             <div class="pkg-id">${escapeHtml(a.package)}</div>
           </td>
-          <td style="color:var(--text-muted); font-size:12px;">${escapeHtml(a.version || 'v1.0')}</td>
+          <td class="pkg-version-col">${escapeHtml(a.version || 'v1.0')}</td>
           <td><span class="tag ${a.system ? 'tag-sys' : 'tag-user'}">${a.system ? 'System' : 'User'}</span></td>
           <td><span class="tag ${a.uninstalled ? 'tag-uninst' : (a.disabled ? 'tag-dis' : 'tag-en')}">${a.uninstalled ? 'Uninstalled' : (a.disabled ? 'Disabled' : 'Enabled')}</span></td>
-          <td style="text-align:center;">
+          <td class="action-col">
             <button class="btn btn-sm" onclick="showAppDetails('${a.package}')">Inspect</button>
           </td>
         </tr>
@@ -1092,17 +563,17 @@
       const data = await res.json();
       const tbody = document.getElementById('process-table-body');
       if (!data.processes || data.processes.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text-muted);">No processes running.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-table-cell">No processes running.</td></tr>';
         return;
       }
       tbody.innerHTML = data.processes.map(p => `
         <tr>
           <td><code>${p.pid}</code></td>
           <td>${p.user}</td>
-          <td style="color:#FBBF24; font-weight:600;">${p.cpu}%</td>
+          <td class="cpu-val">${p.cpu}%</td>
           <td>${p.ram}</td>
-          <td style="font-weight:600;">${escapeHtml(p.name)}</td>
-          <td style="text-align:center;"><button class="btn btn-sm btn-danger" onclick="killPid(${p.pid})">End</button></td>
+          <td class="proc-name">${escapeHtml(p.name)}</td>
+          <td class="action-col"><button class="btn btn-sm btn-danger" onclick="killPid(${p.pid})">End</button></td>
         </tr>
       `).join('');
     }
@@ -1126,11 +597,11 @@
     // ── SCREENSHOT & SCRCPY ──
     async function captureScreenshot() {
       const box = document.getElementById('screen-preview-box');
-      box.innerHTML = '<span style="color:var(--text-muted); padding:40px;">Capturing screenshot...</span>';
+      box.innerHTML = '<span class="screen-loading">Capturing screenshot...</span>';
       const res = await fetch('/api/screen/screenshot');
       const data = await res.json();
       if (data.image_base64) {
-        box.innerHTML = `<img id="live-shot-img" src="${data.image_base64}" style="max-height:500px; max-width:100%; border-radius:6px;">`;
+        box.innerHTML = `<img id="live-shot-img" src="${data.image_base64}" class="screen-img" alt="Live Screen Preview">`;
       }
     }
 
