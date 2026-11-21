@@ -158,6 +158,18 @@ def test_web_server_endpoints(tmp_path, monkeypatch):
     res = client.post("/api/rescue/fastboot", json={"action": "getvar"})
     assert res.status_code == 200
 
+    res = client.get("/index.html")
+    assert res.status_code == 200
+    assert "ADB AppControl" in res.text
+
+    res_static = client.get("/web/style.css")
+    assert res_static.status_code == 200
+
+    # 12. Terminal API
+    res = client.post("/api/terminal/run", json={"command": "getprop ro.product.model"})
+    assert res.status_code == 200
+    assert "success" in res.json()
+
     res = client.get("/api/backups")
     assert res.status_code == 200
     assert "backups" in res.json()

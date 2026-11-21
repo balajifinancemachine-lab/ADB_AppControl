@@ -1025,7 +1025,14 @@ def create_app(store_provider=None) -> FastAPI:
         engine = store.adb_engine
         cur = store.get_current_device()
         serial = cur.serial if cur else ""
-        ok, out, err = engine.run_shell(cmd, target_serial=serial)
+        if cmd.startswith("adb "):
+            parts = shlex.split(cmd[4:])
+            ok, out, err = engine.run_adb(parts, target_serial=serial)
+        elif cmd.startswith("fastboot "):
+            parts = shlex.split(cmd[9:])
+            ok, out, err = engine.run_fastboot(parts, target_serial=serial)
+        else:
+            ok, out, err = engine.run_shell(cmd, target_serial=serial)
         return {"success": ok, "stdout": out, "stderr": err}
 
     # ── LOGS & AUDIT APIS ─────────────────────────────────────────────────────
@@ -1065,8 +1072,9 @@ def create_app(store_provider=None) -> FastAPI:
             return {"ready": False, "status": "Starting Gemma 4B..."}
 
     @app.post("/api/ai/chat")
-    def chat_ai(payload: dict[str, str]):
+    def chat_ai(payload: dict[str, Any]):
         message = payload.get("message", "").strip()
+        confirmed = payload.get("confirmed", True)
         if not message:
             raise HTTPException(status_code=400, detail="Message required")
         store = _get_store()
@@ -1074,7 +1082,12 @@ def create_app(store_provider=None) -> FastAPI:
         if not brain:
             raise HTTPException(status_code=500, detail="AIBrainEngine not attached")
         # Run turn with engine
-        resp, action = brain.execute_copilot_turn(message, store.adb_engine, store)
+        resp, action = brain.execute_copilot_turn(
+            message,
+            store.adb_engine,
+            store,
+            confirm=(lambda p: bool(confirmed))
+        )
         return {"response": resp, "action": action}
 
     # ── SETTINGS APIS ─────────────────────────────────────────────────────────
@@ -1096,6 +1109,7 @@ def create_app(store_provider=None) -> FastAPI:
             return FileResponse(css_file, media_type="text/css")
         return HTMLResponse("", status_code=404)
 
+    @app.get("/index.html", response_class=HTMLResponse)
     @app.get("/", response_class=HTMLResponse)
     def serve_frontend():
         html_file = os.path.join(BASE_DIR, "web", "index.html")
@@ -1103,6 +1117,12 @@ def create_app(store_provider=None) -> FastAPI:
             with open(html_file, encoding="utf-8") as f:
                 return f.read()
         return "<h1>ADB AppControl WebUI is initializing...</h1>"
+
+    web_dir = os.path.join(BASE_DIR, "web")
+    if os.path.isdir(web_dir):
+        from fastapi.staticfiles import StaticFiles
+        app.mount("/web", StaticFiles(directory=web_dir), name="web")
+        app.mount("/static", StaticFiles(directory=web_dir), name="static")
 
     return app
 
