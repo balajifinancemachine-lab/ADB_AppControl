@@ -122,4 +122,13 @@ def test_web_server_endpoints(tmp_path, monkeypatch):
     assert res.status_code == 200
     assert "presets" in res.json()
 
+    # 10. Scan & Processes APIs
+    res = client.post("/api/devices/scan")
+    assert res.status_code == 200
+    assert "device_count" in res.json()
+
+    res = client.get("/api/processes")
+    assert res.status_code == 200
+    assert "processes" in res.json()
+
     store.shutdown()

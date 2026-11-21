@@ -2507,6 +2507,20 @@ class DeviceOverview:
             return self.serial
         return getattr(self, item, default)
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "serial": self.serial,
+            "state": self.state,
+            "transport_mode": self.transport_mode,
+            "device_model": self.device_model,
+            "name": self.name,
+            "android_version": self.android_version,
+            "battery_level": self.battery_level,
+            "battery_status": self.battery_status,
+            "battery_display": self.get_battery_status(),
+            "specs": self.specs,
+        }
+
     def __repr__(self) -> str:
         return f"<DeviceOverview {self.serial} ({self.device_model}) [{self.state}]>"
 
@@ -6037,6 +6051,9 @@ class ADBEngine:
         s = self._resolve_serial(serial)
         ok, out, _ = self.run_shell("ps -A -o PID,USER,RSS,NAME 2>/dev/null || ps", timeout=10, target_serial=s)
         return self._parse_ps(out if ok else "")
+
+    def list_running_processes(self, serial: str = "") -> list[dict[str, Any]]:
+        return self.get_process_list(serial=serial)
 
     @staticmethod
     def _parse_ps(out: str) -> list[dict[str, Any]]:

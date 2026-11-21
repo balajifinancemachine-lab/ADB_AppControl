@@ -27,6 +27,28 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 LOGGER = logging.getLogger("ADBAppControl")
 
 
+def _device_to_dict(d: Any) -> dict[str, Any]:
+    if d is None:
+        return {}
+    if hasattr(d, "to_dict"):
+        try:
+            return d.to_dict()
+        except Exception:
+            pass
+    return {
+        "serial": getattr(d, "serial", ""),
+        "state": getattr(d, "state", "device"),
+        "transport_mode": getattr(d, "transport_mode", "adb"),
+        "device_model": getattr(d, "device_model", "Android Device"),
+        "name": getattr(d, "name", ""),
+        "android_version": getattr(d, "android_version", "Unknown"),
+        "battery_level": getattr(d, "battery_level", None),
+        "battery_status": getattr(d, "battery_status", ""),
+        "battery_display": getattr(d, "get_battery_status", lambda: "")() if hasattr(d, "get_battery_status") else "",
+        "specs": getattr(d, "specs", {}),
+    }
+
+
 def create_app(store_provider=None) -> FastAPI:
     # ── WEBSOCKET CLIENT MANAGER (REAL-TIME STREAMING) ────────────────────────
     class ConnectionManager:
@@ -148,7 +170,7 @@ def create_app(store_provider=None) -> FastAPI:
         brain = getattr(store, "brain_engine", None)
         return {
             "connected_devices_count": len(devs),
-            "current_device": cur.to_dict() if cur else None,
+            "current_device": _device_to_dict(cur) if cur else None,
             "acbridge_ready": store.is_acbridge_ready(),
             "ai_model_ready": getattr(brain, "is_ready", False) if brain else False,
             "ai_status": getattr(brain, "status_msg", "Offline") if brain else "Offline",
@@ -161,7 +183,7 @@ def create_app(store_provider=None) -> FastAPI:
         devs = store.get_device_list()
         cur = store.get_current_device()
         return {
-            "devices": [d.to_dict() for d in devs],
+            "devices": [_device_to_dict(d) for d in devs],
             "active_serial": cur.serial if cur else ""
         }
 
@@ -178,7 +200,7 @@ def create_app(store_provider=None) -> FastAPI:
                 store.update_app_data(apps)
                 APP_DB.cache_packages(serial, apps)
                 _broadcast_sync("device_changed", {"serial": serial, "model": d.device_model})
-                return {"success": True, "device": d.to_dict()}
+                return {"success": True, "device": _device_to_dict(d)}
         return {"success": False, "error": f"Device {serial} not found"}
 
     @app.post("/api/devices/scan")
@@ -191,7 +213,7 @@ def create_app(store_provider=None) -> FastAPI:
         store.batch_update_scan_results(devs, apps, is_bridge)
         if cur:
             APP_DB.cache_packages(cur.serial, apps)
-        _broadcast_sync("scan_complete", {"devices": [d.to_dict() for d in devs], "app_count": len(apps)})
+        _broadcast_sync("scan_complete", {"devices": [_device_to_dict(d) for d in devs], "app_count": len(apps)})
         return {"success": True, "device_count": len(devs), "app_count": len(apps)}
 
     @app.post("/api/devices/reboot")
@@ -420,7 +442,21 @@ def create_app(store_provider=None) -> FastAPI:
         engine = store.adb_engine
         cur = store.get_current_device()
         serial = cur.serial if cur else ""
-        procs = engine.list_running_processes(serial=serial)
+        if hasattr(engine, "get_process_list"):
+            raw_procs = engine.get_process_list(serial=serial)
+        elif hasattr(engine, "list_running_processes"):
+            raw_procs = engine.list_running_processes(serial=serial)
+        else:
+            raw_procs = []
+        procs = []
+        for p in raw_procs:
+            procs.append({
+                "pid": p.get("pid", ""),
+                "user": p.get("user", ""),
+                "cpu": p.get("cpu", "0.0"),
+                "ram": f"{p.get('ram_mb', 0)} MB" if "ram_mb" in p else p.get("ram", "0 MB"),
+                "name": p.get("name", ""),
+            })
         return {"processes": procs, "count": len(procs)}
 
     @app.post("/api/processes/kill")
