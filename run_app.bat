@@ -42,4 +42,5 @@ if not "%~1"=="" (
     exit /b %ERRORLEVEL%
 )
 
-start "" "%PYW%" "appcontrol.pyw"
+rem Launch the WebUI server with a visible console window showing live status and Ctrl+C shutdown.
+start "ADB AppControl WebUI" "%PYCLI%" "appcontrol.pyw"

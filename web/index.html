@@ -1771,6 +1771,12 @@ footer {
 
     // Initialize application on load
     window.addEventListener('DOMContentLoaded', () => {
+      const savedTheme = localStorage.getItem('theme');
+      if (savedTheme) {
+        document.documentElement.setAttribute('data-theme', savedTheme);
+        const sel = document.getElementById('cfg-theme');
+        if (sel) sel.value = savedTheme;
+      }
       initWebSocket();
       checkBackendConnectivity();
       refreshDevicesList();
@@ -2805,6 +2811,7 @@ footer {
       const cur = html.getAttribute('data-theme') || 'dark';
       const nxt = cur === 'dark' ? 'light' : 'dark';
       html.setAttribute('data-theme', nxt);
+      try { localStorage.setItem('theme', nxt); } catch (e) {}
       const sel = document.getElementById('cfg-theme');
       if (sel) sel.value = nxt;
     }
