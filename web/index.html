@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ADB AppControl — Modern Universal Edition</title>
+  <style>
+    :root {
+      --bg-main: #0B0E14;
+      --bg-card: #131822;
+      --bg-hover: #1A212E;
+      --bg-header: #0F131C;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-focus: #1976D2;
+      --text-primary: #F1F5F9;
+      --text-secondary: #94A3B8;
+      --text-muted: #64748B;
+      --accent-blue: #2563EB;
+      --accent-blue-hover: #1D4ED8;
+      --accent-green: #10B981;
+      --accent-red: #EF4444;
+      --accent-amber: #F59E0B;
+      --accent-purple: #8B5CF6;
+      --terminal-bg: #07090E;
+      --font-main: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      --font-mono: "Cascadia Code", "Consolas", "Courier New", monospace;
+    }
+
+    [data-theme="light"] {
+      --bg-main: #F8FAFC;
+      --bg-card: #FFFFFF;
+      --bg-hover: #F1F5F9;
+      --bg-header: #FFFFFF;
+      --border: #E2E8F0;
+      --border-focus: #2563EB;
+      --text-primary: #0F172A;
+      --text-secondary: #475569;
+      --text-muted: #94A3B8;
+      --terminal-bg: #0F172A;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font-main);
+      background: var(--bg-main);
+      color: var(--text-primary);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      font-size: 13px;
+    }
+
+    /* ── HEADER ── */
+    header {
+      height: 52px;
+      background: var(--bg-header);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      flex-shrink: 0;
+      z-index: 20;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: -0.3px;
+    }
+
+    .badge-universal {
+      background: linear-gradient(135deg, #1E40AF, #3B82F6);
+      color: white;
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 7px;
+      border-radius: 4px;
+      letter-spacing: 0.5px;
+    }
+
+    .header-center {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .select-device {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      outline: none;
+      max-width: 280px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-primary);
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .btn:hover {
+      background: var(--bg-hover);
+      border-color: rgba(255,255,255,0.15);
+    }
+    .btn-primary {
+      background: var(--accent-blue);
+      border-color: var(--accent-blue);
+      color: white;
+    }
+    .btn-primary:hover {
+      background: var(--accent-blue-hover);
+    }
+    .btn-success { background: #059669; border-color: #059669; color: white; }
+    .btn-danger { background: #DC2626; border-color: #DC2626; color: white; }
+    .btn-amber { background: #D97706; border-color: #D97706; color: white; }
+    .btn-sm { padding: 4px 8px; font-size: 11px; }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(16, 185, 129, 0.1);
+      color: var(--accent-green);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+    }
+
+    /* ── WORKSPACE LAYOUT ── */
+    .workspace {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* ── LEFT NAVIGATION SIDEBAR ── */
+    aside {
+      width: 210px;
+      background: var(--bg-header);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      padding: 12px 0;
+      overflow-y: auto;
+    }
+
+    .nav-section-title {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      padding: 8px 16px 4px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 16px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 12.5px;
+      border-left: 3px solid transparent;
+      transition: all 0.12s ease;
+    }
+    .nav-item:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+    .nav-item.active {
+      background: rgba(37, 99, 235, 0.1);
+      color: var(--accent-blue);
+      border-left-color: var(--accent-blue);
+      font-weight: 600;
+    }
+
+    /* ── MAIN CONTENT VIEW ── */
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 16px;
+      background: var(--bg-main);
+      position: relative;
+    }
+
+    .view-panel {
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      height: 100%;
+    }
+    .view-panel.active {
+      display: flex;
+    }
+
+    /* ── TOP CONTROLS & CARDS ── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 18px;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .search-input {
+      background: var(--bg-main);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-primary);
+      padding: 7px 12px;
+      font-size: 12.5px;
+      outline: none;
+      width: 240px;
+      transition: border 0.15s ease;
+    }
+    .search-input:focus {
+      border-color: var(--border-focus);
+    }
+
+    .chip-group {
+      display: flex;
+      gap: 4px;
+      background: var(--bg-main);
+      padding: 3px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+    .chip {
+      padding: 4px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      transition: all 0.15s ease;
+    }
+    .chip.active {
+      background: var(--bg-card);
+      color: var(--text-primary);
+      font-weight: 600;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    /* ── HIGH PERFORMANCE TABLE (ZERO HORIZONTAL SCROLL) ── */
+    .table-container {
+      flex: 1;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow-y: auto;
+      overflow-x: hidden !important;
+      position: relative;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed !important;
+      overflow-x: hidden !important;
+      text-align: left;
+    }
+
+    thead th {
+      position: sticky;
+      top: 0;
+      background: var(--bg-header);
+      padding: 10px 14px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      z-index: 5;
+    }
+
+    tbody td {
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      vertical-align: middle;
+    }
+    tbody tr:hover {
+      background: var(--bg-hover);
+    }
+
+    .app-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      vertical-align: middle;
+      margin-right: 10px;
+      flex-shrink: 0;
+    }
+
+    .pkg-title {
+      font-weight: 600;
+      color: var(--text-primary);
+      font-size: 12.5px;
+    }
+    .pkg-id {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .tag-sys { background: rgba(139, 92, 246, 0.15); color: #A78BFA; }
+    .tag-user { background: rgba(59, 130, 246, 0.15); color: #60A5FA; }
+    .tag-dis { background: rgba(239, 68, 68, 0.15); color: #F87171; }
+    .tag-uninst { background: rgba(245, 158, 11, 0.15); color: #FBBF24; }
+    .tag-en { background: rgba(16, 185, 129, 0.15); color: #34D399; }
+
+    /* ── RIGHT LIVE ACTIVITY CONSOLE ── */
+    #live-console {
+      width: 380px;
+      background: var(--bg-header);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      transition: width 0.2s ease;
+      z-index: 10;
+    }
+    #live-console.collapsed {
+      width: 38px;
+    }
+    #live-console.collapsed .console-body,
+    #live-console.collapsed .console-footer {
+      display: none;
+    }
+    #live-console.collapsed .console-header-title {
+      writing-mode: vertical-lr;
+      transform: rotate(180deg);
+      margin-top: 15px;
+    }
+
+    .console-header {
+      height: 42px;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .terminal-body {
+      flex: 1;
+      background: var(--terminal-bg);
+      padding: 10px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.5;
+      overflow-y: auto;
+      color: #CBD5E1;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .terminal-line-cmd { color: #38BDF8; font-weight: 600; }
+    .terminal-line-success { color: #4ADE80; }
+    .terminal-line-error { color: #F87171; }
+    .terminal-line-warn { color: #FBBF24; }
+    .terminal-line-info { color: #94A3B8; }
+
+    .terminal-input-bar {
+      padding: 8px 10px;
+      background: var(--bg-card);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .terminal-input {
+      flex: 1;
+      background: var(--bg-main);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-primary);
+      padding: 5px 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      outline: none;
+    }
+
+    /* ── MODALS ── */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(2px);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-backdrop.active {
+      display: flex;
+    }
+    .modal-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      width: 580px;
+      max-width: 90vw;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+      animation: modalFadeIn 0.15s ease-out;
+    }
+    @keyframes modalFadeIn {
+      from { opacity: 0; transform: scale(0.96); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .modal-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .modal-body {
+      padding: 16px 18px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .modal-footer {
+      padding: 12px 18px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    /* ── COPILOT CHAT ── */
+    .chat-container {
+      display: flex;
+      flex: 1;
+      gap: 12px;
+      height: 100%;
+    }
+    .chat-pane {
+      flex: 3;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .chat-history {
+      flex: 1;
+      padding: 14px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .chat-msg {
+      max-width: 80%;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 12.5px;
+      line-height: 1.45;
+    }
+    .chat-user {
+      align-self: flex-end;
+      background: var(--accent-blue);
+      color: white;
+    }
+    .chat-ai {
+      align-self: flex-start;
+      background: var(--bg-hover);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+    }
+    .chat-input-bar {
+      padding: 10px 14px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header>
+    <div class="brand">
+      <span style="font-size:18px;">⚡</span>
+      <span>ADB AppControl</span>
+      <span class="badge-universal">WEBUI</span>
+    </div>
+
+    <div class="header-center">
+      <select id="device-select" class="select-device" onchange="onSelectDevice()">
+        <option value="">Scanning devices...</option>
+      </select>
+
+      <button class="btn btn-sm" onclick="triggerScan()">🔄 Scan</button>
+      <span id="badge-bridge" class="status-badge" style="display:none;">✔ AC Bridge</span>
+      <span id="badge-ai" class="status-badge" style="color:var(--text-muted); border-color:var(--border);">○ AI: Offline</span>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:8px;">
+      <button class="btn btn-sm" onclick="openWirelessModal()">📶 Wi-Fi</button>
+      <button class="btn btn-sm btn-amber" onclick="openRebootModal()">🔄 Reboot</button>
+      <button class="btn btn-sm" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+  </header>
+
+  <!-- WORKSPACE -->
+  <div class="workspace">
+
+    <!-- LEFT SIDEBAR -->
+    <aside>
+      <div class="nav-section-title">Device & Applications</div>
+      <div class="nav-item active" onclick="switchTab('apps')">📱 Applications</div>
+      <div class="nav-item" onclick="switchTab('debloat')">🧹 Debloat Wizard</div>
+      <div class="nav-item" onclick="switchTab('process')">⚡ Process Manager</div>
+      <div class="nav-item" onclick="switchTab('permissions')">🛡 Permissions</div>
+
+      <div class="nav-section-title">Remote & Tools</div>
+      <div class="nav-item" onclick="switchTab('screen')">📺 Screen & Remote</div>
+      <div class="nav-item" onclick="switchTab('files')">📂 Install & Files</div>
+      <div class="nav-item" onclick="switchTab('rescue')">🔧 Rescue & Unbrick</div>
+
+      <div class="nav-section-title">Intelligence & Safety</div>
+      <div class="nav-item" onclick="switchTab('copilot')">🧠 AI Brain Copilot</div>
+      <div class="nav-item" onclick="switchTab('journal')">📜 Safety Journal</div>
+      <div class="nav-item" onclick="switchTab('settings')">⚙️ Settings</div>
+    </aside>
+
+    <!-- MAIN VIEW -->
+    <main>
+
+      <!-- 1. APPLICATIONS VIEW -->
+      <div id="view-apps" class="view-panel active">
+        <div class="card toolbar">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <input type="text" id="app-search" class="search-input" placeholder="Search app or package..." oninput="filterApps()">
+            <div class="chip-group">
+              <div class="chip active" onclick="setAppFilter('all', this)">All (<span id="cnt-all">0</span>)</div>
+              <div class="chip" onclick="setAppFilter('user', this)">User (<span id="cnt-user">0</span>)</div>
+              <div class="chip" onclick="setAppFilter('system', this)">System (<span id="cnt-system">0</span>)</div>
+              <div class="chip" onclick="setAppFilter('disabled', this)">Disabled (<span id="cnt-disabled">0</span>)</div>
+              <div class="chip" onclick="setAppFilter('uninstalled', this)">Uninstalled (<span id="cnt-uninstalled">0</span>)</div>
+            </div>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:6px;">
+            <button class="btn btn-sm btn-danger" onclick="executeBatchAction('uninstall')">🗑 Uninstall</button>
+            <button class="btn btn-sm btn-amber" onclick="executeBatchAction('disable')">⏸ Disable</button>
+            <button class="btn btn-sm btn-success" onclick="executeBatchAction('enable')">▶ Enable</button>
+            <button class="btn btn-sm" onclick="executeBatchAction('clear')">🧹 Clear</button>
+            <button class="btn btn-sm" onclick="executeBatchAction('backup')">💾 Backup</button>
+            <button class="btn btn-sm" onclick="executeBatchAction('restore')">📦 Restore</button>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table id="apps-table">
+            <thead>
+              <tr>
+                <th style="width:38px;"><input type="checkbox" onchange="toggleSelectAll(this.checked)"></th>
+                <th style="width:50px;">App</th>
+                <th>Application Name & Package</th>
+                <th style="width:110px;">Version</th>
+                <th style="width:90px;">Type</th>
+                <th style="width:90px;">Status</th>
+                <th style="width:80px; text-align:center;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="apps-table-body">
+              <tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted);">Connect a device to inspect installed applications.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 2. DEBLOAT WIZARD VIEW -->
+      <div id="view-debloat" class="view-panel">
+        <div class="card toolbar">
+          <div>
+            <h3 style="font-size:14px; font-weight:700;">🧹 Smart Debloat Wizard</h3>
+            <p style="color:var(--text-muted); font-size:11px;">1-Click safe OEM bloatware removal, battery optimization & telemetry cleaner.</p>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-sm btn-primary" onclick="loadDebloatPreset('samsung')">Samsung Safe</button>
+            <button class="btn btn-sm btn-primary" onclick="loadDebloatPreset('xiaomi')">Xiaomi / MIUI</button>
+            <button class="btn btn-sm btn-primary" onclick="loadDebloatPreset('google')">Google Telemetry</button>
+            <button class="btn btn-sm btn-primary" onclick="loadDebloatPreset('carrier')">Carrier Bloat</button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:38px;"><input type="checkbox"></th>
+                <th>Package Name</th>
+                <th>Description</th>
+                <th style="width:100px;">Safety Level</th>
+                <th style="width:120px;">Recommendation</th>
+              </tr>
+            </thead>
+            <tbody id="debloat-table-body">
+              <tr><td colspan="5" style="text-align:center; padding:30px; color:var(--text-muted);">Select a debloat preset above to scan bloatware.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 3. PROCESS MANAGER VIEW -->
+      <div id="view-process" class="view-panel">
+        <div class="card toolbar">
+          <div>
+            <h3 style="font-size:14px; font-weight:700;">⚡ Real-Time Process Monitor</h3>
+            <p style="color:var(--text-muted); font-size:11px;">Inspect memory consumption, CPU load, and optimize background services.</p>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-sm btn-success" onclick="trimRam()">🧠 Trim RAM</button>
+            <button class="btn btn-sm" onclick="loadProcesses()">🔄 Refresh</button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:80px;">PID</th>
+                <th style="width:120px;">User</th>
+                <th style="width:90px;">CPU %</th>
+                <th style="width:110px;">RAM (RSS)</th>
+                <th>Process / Package</th>
+                <th style="width:80px; text-align:center;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="process-table-body">
+              <tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text-muted);">Click Refresh to read running processes.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 4. PERMISSIONS VIEW -->
+      <div id="view-permissions" class="view-panel">
+        <div class="card toolbar">
+          <div>
+            <h3 style="font-size:14px; font-weight:700;">🛡 Runtime Permissions Auditor</h3>
+            <p style="color:var(--text-muted); font-size:11px;">Inspect and toggle sensitive Android hardware permissions.</p>
+          </div>
+          <button class="btn btn-sm" onclick="loadPermissions()">🔄 Refresh</button>
+        </div>
+        <div class="table-container" id="permissions-container">
+          <div style="padding:30px; text-align:center; color:var(--text-muted);">Click Refresh to load permissions audit.</div>
+        </div>
+      </div>
+
+      <!-- 5. SCREEN & REMOTE VIEW -->
+      <div id="view-screen" class="view-panel">
+        <div style="display:flex; gap:16px; height:100%;">
+          <div class="card" style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+            <div id="screen-preview-box" style="max-height:540px; display:flex; align-items:center; justify-content:center; background:#000; border-radius:8px; overflow:hidden;">
+              <span style="color:var(--text-muted); padding:40px;">No screenshot captured yet.</span>
+            </div>
+            <div style="display:flex; gap:8px; margin-top:12px;">
+              <button class="btn btn-primary" onclick="captureScreenshot()">📸 Capture Screen</button>
+              <button class="btn" onclick="copyScreenshotClipboard()">📋 Copy</button>
+            </div>
+          </div>
+          <div class="card" style="width:340px; display:flex; flex-direction:column; gap:14px;">
+            <h3 style="font-size:14px; font-weight:700;">📺 Scrcpy Display Mirroring</h3>
+            <p style="color:var(--text-muted); font-size:11px;">Control your phone in real-time with ultra-low latency.</p>
+            <label style="font-size:11px; font-weight:600;">Resolution:</label>
+            <select id="scrcpy-res" class="select-device" style="max-width:100%;">
+              <option value="">Default (Native)</option>
+              <option value="1080">1080p</option>
+              <option value="720">720p</option>
+            </select>
+            <label style="font-size:11px; font-weight:600;">Bitrate:</label>
+            <select id="scrcpy-bitrate" class="select-device" style="max-width:100%;">
+              <option value="8M">8 Mbps (Recommended)</option>
+              <option value="16M">16 Mbps (High Quality)</option>
+              <option value="4M">4 Mbps (Smooth)</option>
+            </select>
+            <div style="margin-top:auto;">
+              <button class="btn btn-primary" style="width:100%; justify-content:center;" onclick="launchScrcpy()">▶ Start Mirroring</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 6. INSTALL & FILES VIEW -->
+      <div id="view-files" class="view-panel">
+        <div class="card toolbar">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-weight:700;">Path:</span>
+            <input type="text" id="file-path-input" class="search-input" value="/sdcard/" style="width:320px;">
+            <button class="btn btn-sm" onclick="navigateFiles()">Go</button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>File / Folder Name</th>
+                <th style="width:110px;">Size</th>
+                <th style="width:120px;">Permissions</th>
+                <th style="width:100px; text-align:center;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="files-table-body">
+              <tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-muted);">Navigate to load remote filesystem.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 7. RESCUE & UNBRICK VIEW -->
+      <div id="view-rescue" class="view-panel">
+        <div class="card">
+          <h3 style="font-size:14px; font-weight:700; margin-bottom:6px;">🔧 Hardware Recovery & Fastboot Flasher</h3>
+          <p style="color:var(--text-muted); font-size:11px; margin-bottom:14px;">One-click boot commands for unbricking and custom ROM / partition flashing.</p>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-amber" onclick="rebootTarget('recovery')">🔄 Reboot to Recovery</button>
+            <button class="btn btn-danger" onclick="rebootTarget('bootloader')">⚡ Reboot to Bootloader</button>
+            <button class="btn btn-danger" onclick="rebootTarget('edl')">🛑 Reboot to Qualcomm EDL</button>
+            <button class="btn btn-amber" onclick="rebootTarget('fastboot')">🔧 Reboot to Fastbootd</button>
+            <button class="btn btn-success" onclick="rebootTarget('system')">▶ Reboot to Normal System</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 8. AI BRAIN COPILOT VIEW -->
+      <div id="view-copilot" class="view-panel">
+        <div class="chat-container">
+          <div class="chat-pane">
+            <div style="padding:10px 14px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-weight:700;">🧠 Gemma 4B Conversational Copilot</span>
+              <button id="btn-toggle-model" class="btn btn-sm btn-success" onclick="toggleAIModel()">▶ Start Model</button>
+            </div>
+            <div id="chat-history" class="chat-history">
+              <div class="chat-msg chat-ai">Hello! I am your local ADB AppControl Copilot. Ask me about bloatware, safety of any package, battery diagnostics, or tell me to run actions like "Take a screenshot" or "Uninstall com.example.app".</div>
+            </div>
+            <div class="chat-input-bar">
+              <input type="text" id="chat-input" class="search-input" style="flex:1;" placeholder="Ask Gemma or give a command..." onkeydown="if(event.key==='Enter') sendChatMessage()">
+              <button class="btn btn-primary" onclick="sendChatMessage()">Send</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 9. SAFETY JOURNAL VIEW -->
+      <div id="view-journal" class="view-panel">
+        <div class="card toolbar">
+          <div>
+            <h3 style="font-size:14px; font-weight:700;">📜 Mutation Safety Journal</h3>
+            <p style="color:var(--text-muted); font-size:11px;">Persistent SQLite rollback journal. 1-Click undo for all disabled or uninstalled packages.</p>
+          </div>
+          <button class="btn btn-sm" onclick="loadJournal()">🔄 Refresh</button>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:140px;">Timestamp</th>
+                <th style="width:90px;">Action</th>
+                <th>Package Name</th>
+                <th>Undo Command</th>
+                <th style="width:90px; text-align:center;">Rollback</th>
+              </tr>
+            </thead>
+            <tbody id="journal-table-body">
+              <tr><td colspan="5" style="text-align:center; padding:30px; color:var(--text-muted);">No mutations recorded yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 10. SETTINGS VIEW -->
+      <div id="view-settings" class="view-panel">
+        <div class="card" style="max-width:600px; display:flex; flex-direction:column; gap:14px;">
+          <h3 style="font-size:14px; font-weight:700;">⚙️ Application Settings</h3>
+          <p style="color:var(--text-muted); font-size:11px;">Backed by atomic SQLite WAL mode in <code>data/appcontrol.db</code>.</p>
+          <label style="font-weight:600;">Theme:</label>
+          <select id="cfg-theme" class="select-device" onchange="toggleTheme()">
+            <option value="dark">Dark Theme (Fintech Sleek)</option>
+            <option value="light">Light Theme</option>
+          </select>
+          <label style="font-weight:600;">Database Engine:</label>
+          <div style="color:var(--accent-green); font-weight:600;">✔ SQLite 3 WAL Mode Active (data/appcontrol.db)</div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- RIGHT LIVE ACTIVITY CONSOLE (DOCK) -->
+    <div id="live-console">
+      <div class="console-header">
+        <span class="console-header-title" style="font-weight:700; font-size:11px; letter-spacing:0.5px;">⚡ LIVE CONSOLE</span>
+        <div style="display:flex; gap:4px;">
+          <button class="btn btn-sm" onclick="copyConsole()">📋</button>
+          <button class="btn btn-sm" onclick="clearConsole()">🗑</button>
+          <button class="btn btn-sm" onclick="toggleConsole()">▶</button>
+        </div>
+      </div>
+
+      <div id="terminal-output" class="terminal-body">
+[SYSTEM] ADB AppControl WebUI initialized.
+[SYSTEM] Connected to SQLite database and live real-time WebSocket.
+      </div>
+
+      <div class="terminal-input-bar">
+        <span style="color:#38BDF8; font-weight:bold; font-family:var(--font-mono);">$</span>
+        <input type="text" id="terminal-cmd-input" class="terminal-input" placeholder="adb shell command..." onkeydown="if(event.key==='Enter') runQuickCommand()">
+        <button class="btn btn-sm btn-primary" onclick="runQuickCommand()">Run</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- WIRELESS MODAL -->
+  <div id="wireless-modal" class="modal-backdrop">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span>📶 Connect Wireless Debugging</span>
+        <button class="btn btn-sm" onclick="closeWirelessModal()">✖</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:12px;">
+        <label style="font-weight:600;">IP Address & Port (e.g. 192.168.1.50:5555):</label>
+        <input type="text" id="wireless-ip" class="search-input" style="width:100%;" placeholder="192.168.1.x:5555">
+        <label style="font-weight:600;">Pairing Code (Android 11+ optional):</label>
+        <input type="text" id="wireless-code" class="search-input" style="width:100%;" placeholder="6-digit pairing code">
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeWirelessModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitWirelessConnect()">Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let allApps = [];
+    let currentFilter = 'all';
+    let ws = null;
+
+    // ── INITIALIZATION & WEBSOCKET ──
+    window.addEventListener('DOMContentLoaded', () => {
+      initWebSocket();
+      triggerScan();
+    });
+
+    function initWebSocket() {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${proto}//${window.location.host}/ws/live`;
+      ws = new WebSocket(wsUrl);
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          handleWebSocketMessage(msg);
+        } catch (e) {
+          console.error("WS Parse error", e);
+        }
+      };
+
+      ws.onclose = () => {
+        setTimeout(initWebSocket, 2000);
+      };
+    }
+
+    function handleWebSocketMessage(msg) {
+      const term = document.getElementById('terminal-output');
+      if (msg.type === 'log') {
+        const line = document.createElement('div');
+        line.className = `terminal-line-${msg.data.level.toLowerCase()}`;
+        line.textContent = `[${msg.data.time}] [${msg.data.level}] ${msg.data.message}`;
+        term.appendChild(line);
+        term.scrollTop = term.scrollHeight;
+      } else if (msg.type === 'audit') {
+        const line = document.createElement('div');
+        const d = msg.data;
+        line.className = d.status === 'SUCCESS' ? 'terminal-line-success' : 'terminal-line-cmd';
+        line.textContent = `[${msg.timestamp}] ⚡ [${d.category}] ${d.action} -> ${d.status} (${d.duration_sec}s)`;
+        term.appendChild(line);
+        term.scrollTop = term.scrollHeight;
+      }
+    }
+
+    // ── NAVIGATION TABS ──
+    function switchTab(tabId) {
+      document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+
+      const targetView = document.getElementById(`view-${tabId}`);
+      if (targetView) targetView.classList.add('active');
+
+      const activeNav = Array.from(document.querySelectorAll('.nav-item')).find(n => n.getAttribute('onclick')?.includes(tabId));
+      if (activeNav) activeNav.classList.add('active');
+
+      if (tabId === 'apps') loadApps();
+      if (tabId === 'process') loadProcesses();
+      if (tabId === 'permissions') loadPermissions();
+      if (tabId === 'files') navigateFiles();
+      if (tabId === 'journal') loadJournal();
+    }
+
+    // ── DEVICE API ──
+    async function triggerScan() {
+      try {
+        const res = await fetch('/api/devices/scan', { method: 'POST' });
+        const data = await res.json();
+        await refreshDevicesList();
+        loadApps();
+      } catch (e) {
+        console.error("Scan error", e);
+      }
+    }
+
+    async function refreshDevicesList() {
+      const res = await fetch('/api/devices');
+      const data = await res.json();
+      const sel = document.getElementById('device-select');
+      sel.innerHTML = '';
+      if (!data.devices || data.devices.length === 0) {
+        sel.innerHTML = '<option value="">No Devices Attached</option>';
+        return;
+      }
+      data.devices.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.serial;
+        opt.textContent = `${d.device_model || 'Device'} (${d.serial}) [${d.state}]`;
+        if (d.serial === data.active_serial) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    }
+
+    async function onSelectDevice() {
+      const sel = document.getElementById('device-select').value;
+      if (!sel) return;
+      await fetch('/api/devices/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serial: sel })
+      });
+      loadApps();
+    }
+
+    // ── APPLICATIONS API ──
+    async function loadApps() {
+      try {
+        const res = await fetch('/api/apps');
+        const data = await res.json();
+        allApps = data.apps || [];
+        updateAppStats(data.stats || {});
+        renderAppsTable(allApps);
+      } catch (e) {
+        console.error("Error loading apps", e);
+      }
+    }
+
+    function updateAppStats(stats) {
+      document.getElementById('cnt-all').textContent = stats.total || 0;
+      document.getElementById('cnt-user').textContent = stats.user || 0;
+      document.getElementById('cnt-system').textContent = stats.system || 0;
+      document.getElementById('cnt-disabled').textContent = stats.disabled || 0;
+      document.getElementById('cnt-uninstalled').textContent = stats.uninstalled || 0;
+    }
+
+    function setAppFilter(filter, chip) {
+      currentFilter = filter;
+      document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      filterApps();
+    }
+
+    function filterApps() {
+      const q = document.getElementById('app-search').value.toLowerCase().trim();
+      const filtered = allApps.filter(a => {
+        const name = (a.name || a.package || '').toLowerCase();
+        const pkg = (a.package || '').toLowerCase();
+        if (q && !name.includes(q) && !pkg.includes(q)) return false;
+        if (currentFilter === 'user' && a.system) return false;
+        if (currentFilter === 'system' && !a.system) return false;
+        if (currentFilter === 'disabled' && !a.disabled) return false;
+        if (currentFilter === 'uninstalled' && !a.uninstalled) return false;
+        return true;
+      });
+      renderAppsTable(filtered);
+    }
+
+    function renderAppsTable(apps) {
+      const tbody = document.getElementById('apps-table-body');
+      if (!apps || apps.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted);">No applications found.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = apps.map(a => `
+        <tr>
+          <td><input type="checkbox" class="pkg-checkbox" data-pkg="${a.package}"></td>
+          <td><img src="/api/apps/icon/${a.package}" class="app-icon" loading="lazy"></td>
+          <td>
+            <div class="pkg-title">${escapeHtml(a.name || a.package)}</div>
+            <div class="pkg-id">${escapeHtml(a.package)}</div>
+          </td>
+          <td style="color:var(--text-muted); font-size:11px;">${escapeHtml(a.version || 'v1.0')}</td>
+          <td><span class="tag ${a.system ? 'tag-sys' : 'tag-user'}">${a.system ? 'System' : 'User'}</span></td>
+          <td><span class="tag ${a.uninstalled ? 'tag-uninst' : (a.disabled ? 'tag-dis' : 'tag-en')}">${a.uninstalled ? 'Uninstalled' : (a.disabled ? 'Disabled' : 'Enabled')}</span></td>
+          <td style="text-align:center;">
+            <button class="btn btn-sm" onclick="showAppDetails('${a.package}')">Inspect</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function toggleSelectAll(checked) {
+      document.querySelectorAll('.pkg-checkbox').forEach(cb => cb.checked = checked);
+    }
+
+    async function executeBatchAction(action) {
+      const selected = Array.from(document.querySelectorAll('.pkg-checkbox:checked')).map(cb => cb.dataset.pkg);
+      if (selected.length === 0) {
+        alert("Please select at least one application.");
+        return;
+      }
+      if (!confirm(`Are you sure you want to perform '${action}' on ${selected.length} package(s)?`)) return;
+
+      const res = await fetch('/api/apps/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action, packages: selected, backup: true })
+      });
+      const data = await res.json();
+      loadApps();
+    }
+
+    // ── PROCESSES API ──
+    async function loadProcesses() {
+      const res = await fetch('/api/processes');
+      const data = await res.json();
+      const tbody = document.getElementById('process-table-body');
+      if (!data.processes || data.processes.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text-muted);">No processes running.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = data.processes.map(p => `
+        <tr>
+          <td><code>${p.pid}</code></td>
+          <td>${p.user}</td>
+          <td style="color:var(--accent-amber); font-weight:600;">${p.cpu}%</td>
+          <td>${p.ram}</td>
+          <td style="font-weight:600;">${escapeHtml(p.name)}</td>
+          <td style="text-align:center;"><button class="btn btn-sm btn-danger" onclick="killPid(${p.pid})">End</button></td>
+        </tr>
+      `).join('');
+    }
+
+    async function trimRam() {
+      const res = await fetch('/api/processes/trim', { method: 'POST' });
+      const data = await res.json();
+      alert(data.message);
+      loadProcesses();
+    }
+
+    async function killPid(pid) {
+      await fetch('/api/processes/kill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid: pid })
+      });
+      loadProcesses();
+    }
+
+    // ── SCREENSHOT & SCRCPY ──
+    async function captureScreenshot() {
+      const box = document.getElementById('screen-preview-box');
+      box.innerHTML = '<span style="color:var(--text-muted); padding:40px;">Capturing screenshot...</span>';
+      const res = await fetch('/api/screen/screenshot');
+      const data = await res.json();
+      if (data.image_base64) {
+        box.innerHTML = `<img id="live-shot-img" src="${data.image_base64}" style="max-height:500px; max-width:100%; border-radius:6px;">`;
+      }
+    }
+
+    async function launchScrcpy() {
+      const res = document.getElementById('scrcpy-res').value;
+      const bitrate = document.getElementById('scrcpy-bitrate').value;
+      const r = await fetch('/api/screen/scrcpy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ max_size: res, bitrate: bitrate, stay_awake: true })
+      });
+      const data = await r.json();
+      alert(data.message);
+    }
+
+    // ── REBOOT API ──
+    async function rebootTarget(target) {
+      if (!confirm(`Reboot device into ${target.toUpperCase()}?`)) return;
+      const res = await fetch('/api/devices/reboot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target: target })
+      });
+      const data = await res.json();
+      alert(data.message);
+    }
+
+    // ── COPILOT CHAT ──
+    async function sendChatMessage() {
+      const input = document.getElementById('chat-input');
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+
+      const hist = document.getElementById('chat-history');
+      hist.innerHTML += `<div class="chat-msg chat-user">${escapeHtml(text)}</div>`;
+      hist.scrollTop = hist.scrollHeight;
+
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text })
+      });
+      const data = await res.json();
+      hist.innerHTML += `<div class="chat-msg chat-ai">${escapeHtml(data.response || 'No response')}</div>`;
+      hist.scrollTop = hist.scrollHeight;
+    }
+
+    async function toggleAIModel() {
+      const res = await fetch('/api/ai/toggle', { method: 'POST' });
+      const data = await res.json();
+      document.getElementById('badge-ai').textContent = `● AI: ${data.status}`;
+    }
+
+    // ── TERMINAL QUICK COMMAND ──
+    async function runQuickCommand() {
+      const input = document.getElementById('terminal-cmd-input');
+      const cmd = input.value.trim();
+      if (!cmd) return;
+      input.value = '';
+      const res = await fetch('/api/terminal/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: cmd })
+      });
+      const data = await res.json();
+      const term = document.getElementById('terminal-output');
+      term.innerHTML += `<div class="terminal-line-cmd">$ ${escapeHtml(cmd)}</div>`;
+      term.innerHTML += `<div>${escapeHtml(data.stdout || data.stderr || '(no output)')}</div>`;
+      term.scrollTop = term.scrollHeight;
+    }
+
+    function toggleConsole() {
+      document.getElementById('live-console').classList.toggle('collapsed');
+    }
+    function clearConsole() {
+      document.getElementById('terminal-output').innerHTML = '';
+    }
+    function copyConsole() {
+      navigator.clipboard.writeText(document.getElementById('terminal-output').innerText);
+      alert("Console output copied to clipboard!");
+    }
+
+    function toggleTheme() {
+      const html = document.documentElement;
+      const cur = html.getAttribute('data-theme') || 'dark';
+      html.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+    }
+
+    function escapeHtml(str) {
+      return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+  </script>
+</body>
+</html>

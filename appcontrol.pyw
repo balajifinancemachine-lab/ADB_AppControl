@@ -440,6 +440,12 @@ if not isinstance(sys.stdout, NullIO):
     except Exception:
         pass
 
+try:
+    from app_database import APP_DB, SQLiteLogHandler
+    LOGGER.addHandler(SQLiteLogHandler(APP_DB))
+except Exception:
+    APP_DB = None
+
 LOGGER.info("ADB AppControl initialized. Install dir: %s | Data dir: %s", BASE_DIR, DATA_DIR)
 if LAYOUT_REPORT.get("migrated") or LAYOUT_REPORT.get("created"):
     LOGGER.info(
@@ -580,6 +586,11 @@ class AuditLogger:
         return f"Exported {len(data)} audit records to: {filepath}"
 
 AUDIT_LOGGER = AuditLogger(max_records=1500)
+if APP_DB is not None:
+    try:
+        AUDIT_LOGGER.subscribe(lambda rec: APP_DB.record_audit(rec.to_dict()))
+    except Exception:
+        pass
 
 # ── INPUT VALIDATION & SAFE EXTRACTION HELPERS ────────────────────────────────
 PACKAGE_NAME_RE = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.]*$')
@@ -926,6 +937,14 @@ class MutationJournal:
             entries = list(self._load())
             entries.append(entry)
             self._save(entries)
+        if APP_DB is not None:
+            try:
+                APP_DB.record_mutation(
+                    entry["id"], serial or "", action, package, undo_command,
+                    label or f"Undo {action} {package}", backup_dir
+                )
+            except Exception:
+                pass
         LOGGER.info("[UNDO] Recorded %s for %s (undo: %s)", action, package, undo_command[:80])
         return entry["id"]
 
@@ -948,6 +967,11 @@ class MutationJournal:
                     e["undone_at"] = datetime.now().isoformat(timespec="seconds")
                     break
             self._save(entries)
+        if APP_DB is not None:
+            try:
+                APP_DB.mark_mutation_undone(entry_id)
+            except Exception:
+                pass
 
     def get(self, entry_id: str) -> dict[str, Any] | None:
         for e in self._load():
@@ -6811,12 +6835,18 @@ class AIBrainEngine:
                         payload = json.loads(body)
                     except (ValueError, TypeError):
                         payload = None
-                    if isinstance(payload, dict) and "status" in payload:
-                        self.port = p
-                        self.is_starting = False
-                        self._notify_status("Ready (Gemma 4B)", True)
-                        LOGGER.info("Attached to running Gemma server on port %d", p)
-                        return
+                    if isinstance(payload, dict) and payload.get("status") in ("ok", "loading model") and ("slots" in payload or payload.get("status") == "ok"):
+                        # Verify this is actually a llama-server by querying /props or checking structure
+                        try:
+                            with urllib.request.urlopen(f"http://127.0.0.1:{p}/props", timeout=0.6) as pr:
+                                if pr.status == 200:
+                                    self.port = p
+                                    self.is_starting = False
+                                    self._notify_status("Ready (Gemma 4B)", True)
+                                    LOGGER.info("Attached to running Gemma llama-server on port %d", p)
+                                    return
+                        except Exception:
+                            pass
                 except Exception:
                     pass
 
@@ -6993,7 +7023,18 @@ class AIBrainEngine:
                 elif reasoning:
                     final_text = reasoning
                 else:
-                    final_text = "The local model returned an empty response. Please try rephrasing your question."
+                    # Fallback to direct /completion which is 100% reliable in llama.cpp
+                    try:
+                        gemma_prompt = f"<start_of_turn>user\n{sys_msg}\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
+                        c_payload = json.dumps({"prompt": gemma_prompt, "n_predict": max_tokens, "temperature": temperature}).encode("utf-8")
+                        c_req = urllib.request.Request(f"http://127.0.0.1:{self.port}/completion", data=c_payload, headers={"Content-Type": "application/json"})
+                        with urllib.request.urlopen(c_req, timeout=90) as c_resp:
+                            c_data = json.loads(c_resp.read().decode("utf-8"))
+                            final_text = (c_data.get("content") or "").strip()
+                    except Exception:
+                        final_text = ""
+                    if not final_text:
+                        final_text = "The local model returned an empty response. Please try rephrasing your question."
 
                 self._ai_fail_count = 0
                 self._ai_cooldown_until = 0.0
@@ -14437,7 +14478,7 @@ if __name__ == "__main__":
         res = organize_device_storage()
         print(f"Storage organization complete: {res}")
         sys.exit(0)
-    else:
+    elif "--gui" in sys.argv:
         lock_error = acquire_single_instance_lock()
         if lock_error:
             print(lock_error)
@@ -14458,4 +14499,24 @@ if __name__ == "__main__":
                 )
             except Exception:
                 pass
+            sys.exit(1)
+    else:
+        # Default ultra-fast modern WebUI architecture
+        try:
+            from web_server import run_web_server
+            port = 8080
+            if "--port" in sys.argv:
+                try:
+                    p_idx = sys.argv.index("--port")
+                    port = int(sys.argv[p_idx + 1])
+                except Exception:
+                    pass
+            no_browser = "--no-browser" in sys.argv or "--headless" in sys.argv
+            store = AppStateStore(AppConfig())
+            run_web_server(store_provider=lambda: store, port=port, open_browser=not no_browser)
+        except KeyboardInterrupt:
+            print("\nShutting down ADB AppControl WebUI gracefully...")
+            sys.exit(0)
+        except Exception as e:
+            LOGGER.critical("WebUI server encountered an error: %s", e, exc_info=True)
             sys.exit(1)
