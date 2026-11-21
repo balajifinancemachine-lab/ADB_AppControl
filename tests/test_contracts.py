@@ -631,7 +631,7 @@ def test_undo_reinstalls_from_backup(app, tmp_path):
 
 
 def test_no_hardcoded_user_profile_paths(app):
-    with open(os.path.join(ROOT, "appcontrol.pyw"), "r", encoding="utf-8", errors="ignore") as f:
+    with open(os.path.join(ROOT, "appcontrol.pyw"), encoding="utf-8", errors="ignore") as f:
         source = f.read()
     assert ("C:" + os.sep + "Users" + os.sep) not in source
     assert "/Users/" not in source

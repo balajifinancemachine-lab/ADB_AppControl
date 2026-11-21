@@ -1,0 +1,42 @@
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "W",      # pycodestyle warnings
+    "I",      # isort
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "RUF",    # ruff-specific rules
+    "SIM",    # flake8-simplify
+    "PIE",    # flake8-pie
+    "C4",     # flake8-comprehensions
+    "FURB",   # refurb
+]
+ignore = [
+    "E402",   # module-level import not at top of file (dependency bootstrap runs before GUI imports)
+    "E501",   # line-too-long (UI labels / complex ADB scripts)
+    "E701",   # multiple statements on one line colon (concise dictionary / telemetry mapping)
+    "E741",   # ambiguous variable name (common in short line loops)
+    "BLE001", # blind-except (essential for GUI desktop apps / background threads to prevent application crash)
+    "S110",   # try-except-pass (safe best-effort probing in UI/subprocess wrappers)
+    "SIM102", # collapsible-if (nested guard clauses are clearer for readability in UI dialogs)
+    "SIM105", # suppressible-exception (contextlib.suppress overhead in tight loops)
+    "SIM108", # ternary operator (if/else is much cleaner for multi-step widget tree setup)
+    "RUF001", # ambiguous-unicode-character-string (intentional UI emoji symbols in buttons & badges)
+    "RUF002", # ambiguous-unicode-character-docstring
+    "RUF003", # ambiguous-unicode-character-comment
+    "RUF005", # collection-literal-concatenation (list + list is standard and clear)
+    "RUF012", # mutable-class-default (acceptable for standard dataclass-style dictionary defaults in GUI classes)
+    "RUF059", # unused-unpacked-variable (unpacking tuple results from ADB like ok, out, err)
+    "B007",   # unused-loop-control-variable
+    "B008",   # function-call-in-default-argument
+    "B904",   # raise-without-from-inside-except
+    "B905",   # zip-without-explicit-strict
+]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true

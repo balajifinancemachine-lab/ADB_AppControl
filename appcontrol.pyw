@@ -5,29 +5,29 @@ All-in-one non-modular architecture: Engine, Views, Rescue/Unbrick Center, MTP/F
 Engineered for Ultra-Low Latency, Zero UI Freezing, Chunked Rendering, and Complete Device Recovery.
 """
 
-import sys
-import os
-import io
-import time
-import json
+import base64
+import contextlib
 import csv
-import queue
-import inspect
-import re
-import shutil
-import shlex
-import zipfile
 import hashlib
 import hmac
-import base64
 import html
+import inspect
+import io
+import json
 import logging
 import logging.handlers
-import subprocess
-import threading
-import urllib.request
+import os
+import queue
+import re
+import shlex
+import shutil
 import sqlite3
-import contextlib
+import subprocess
+import sys
+import threading
+import time
+import urllib.request
+import zipfile
 
 # Windows consoles default to cp1252, which cannot encode status glyphs (🔋, ✔).
 # Without this, `--audit` and any CLI output aborted mid-run on the first emoji.
@@ -37,9 +37,10 @@ for _stream in (sys.stdout, sys.stderr):
             _stream.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
-from datetime import datetime
-from typing import Dict, Any, List, Set, Optional, Tuple, Callable, Union
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from typing import Any
 
 # ── CONSOLE WINDOW SUPPRESSION (Windows) ──────────────────────────────────────
 if sys.platform == "win32":
@@ -266,7 +267,7 @@ def _folder_matches_serial(folder_name: str, safe_serial: str) -> bool:
     )
 
 
-def ensure_layout() -> Dict[str, Any]:
+def ensure_layout() -> dict[str, Any]:
     """Creates the data/tools contract and migrates any legacy root-level layout.
 
     Idempotent: safe on every launch, on a fresh checkout, and on an upgraded install
@@ -274,7 +275,7 @@ def ensure_layout() -> Dict[str, Any]:
     DATA_DIR/TOOLS_DIR wherever those live; on a read-only install every move fails
     soft with a warning, so a launch never breaks over a folder it could not move.
     """
-    report: Dict[str, Any] = {"created": [], "migrated": [], "swept": 0, "root": DATA_DIR}
+    report: dict[str, Any] = {"created": [], "migrated": [], "swept": 0, "root": DATA_DIR}
     for base in (DATA_DIR, TOOLS_DIR):
         try:
             os.makedirs(base, exist_ok=True)
@@ -385,7 +386,6 @@ DEFAULT_GEMMA_MODEL_PATH = _discover_gguf_model()
 # ── LOGGING SYSTEM ────────────────────────────────────────────────────────────
 class AutoFlushRotatingFileHandler(logging.handlers.RotatingFileHandler):
     """Buffered rotating file handler for smooth non-blocking disk logging."""
-    pass
 
 LOGGER = logging.getLogger("ADBAppControl")
 LOGGER.setLevel(logging.INFO)
@@ -482,7 +482,7 @@ class ActionAuditRecord:
         res = (self.response or self.error or "").strip()
         return res[:120].replace("\n", " ")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "timestamp": self.timestamp,
             "category": self.category,
@@ -500,9 +500,9 @@ class AuditLogger:
     """Universal Action, Response, and Result audit tracker with thread-safe ring-buffer and file logging."""
     def __init__(self, max_records: int = 1500):
         self.max_records = max_records
-        self.records: List[ActionAuditRecord] = []
+        self.records: list[ActionAuditRecord] = []
         self._lock = threading.Lock()
-        self._listeners: List[Callable[[ActionAuditRecord], None]] = []
+        self._listeners: list[Callable[[ActionAuditRecord], None]] = []
 
     def subscribe(self, callback: Callable[[ActionAuditRecord], None]):
         with self._lock:
@@ -563,7 +563,7 @@ class AuditLogger:
             except Exception:
                 pass
 
-    def get_recent_records(self, limit: int = 250) -> List[ActionAuditRecord]:
+    def get_recent_records(self, limit: int = 250) -> list[ActionAuditRecord]:
         with self._lock:
             return list(self.records[-limit:])
 
@@ -649,7 +649,7 @@ def _remote_path(path: str) -> str:
     return shlex.quote(str(path or "").strip())
 
 
-def _zip_rel_path(name: str, strip_top_dir: bool = True) -> Optional[str]:
+def _zip_rel_path(name: str, strip_top_dir: bool = True) -> str | None:
     """Returns a safe relative archive member path, rejecting traversal entries."""
     parts = [p for p in str(name).replace("\\", "/").split("/") if p not in ("", ".")]
     if not parts or any(p == ".." for p in parts) or ":" in parts[0]:
@@ -677,7 +677,7 @@ def safe_dialog_parent(widget=None):
 
 
 def _extract_zip_safely(zf: zipfile.ZipFile, dest_dir: str, strip_top_dir: bool = True,
-                        executable_names: Tuple[str, ...] = ()) -> int:
+                        executable_names: tuple[str, ...] = ()) -> int:
     """Extracts archive members without allowing any to escape dest_dir (zip-slip guard)."""
     written = 0
     root = os.path.abspath(dest_dir)
@@ -756,7 +756,7 @@ def ensure_python_dependencies():
 
 ensure_python_dependencies()
 
-from tkinter import messagebox, filedialog, TclError
+from tkinter import TclError, filedialog, messagebox
 
 try:
     import customtkinter as ctk
@@ -803,7 +803,7 @@ def sanitise_untrusted(value: Any, limit: int = 400) -> str:
     return text[:limit]
 
 
-def _dpapi_transform(data: bytes, protect: bool) -> Optional[bytes]:
+def _dpapi_transform(data: bytes, protect: bool) -> bytes | None:
     """Encrypts/decrypts bytes with the current Windows user's DPAPI key.
 
     Returns None when DPAPI is unavailable (non-Windows or a locked-down host),
@@ -877,15 +877,15 @@ class MutationJournal:
     def __init__(self, path: str = ""):
         self.path = path or os.path.join(DATA_DIR, "config", "mutation_journal.json")
         self._lock = threading.Lock()
-        self._cache: Optional[List[Dict[str, Any]]] = None
+        self._cache: list[dict[str, Any]] | None = None
 
-    def _load(self) -> List[Dict[str, Any]]:
+    def _load(self) -> list[dict[str, Any]]:
         if self._cache is not None:
             return self._cache
-        entries: List[Dict[str, Any]] = []
+        entries: list[dict[str, Any]] = []
         try:
             if os.path.isfile(self.path):
-                with open(self.path, "r", encoding="utf-8") as f:
+                with open(self.path, encoding="utf-8") as f:
                     loaded = json.load(f)
                 if isinstance(loaded, list):
                     entries = [e for e in loaded if isinstance(e, dict) and e.get("undo_command")]
@@ -894,7 +894,7 @@ class MutationJournal:
         self._cache = entries
         return entries
 
-    def _save(self, entries: List[Dict[str, Any]]) -> None:
+    def _save(self, entries: list[dict[str, Any]]) -> None:
         self._cache = entries[-self.MAX_ENTRIES:]
         try:
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
@@ -906,7 +906,7 @@ class MutationJournal:
             LOGGER.warning("Could not persist mutation journal: %s", e)
 
     def record(self, serial: str, action: str, package: str, undo_command: str,
-               label: str = "", detail: str = "", backup_dir: str = "") -> Optional[str]:
+               label: str = "", detail: str = "", backup_dir: str = "") -> str | None:
         if not undo_command:
             return None
         entry = {
@@ -929,7 +929,7 @@ class MutationJournal:
         LOGGER.info("[UNDO] Recorded %s for %s (undo: %s)", action, package, undo_command[:80])
         return entry["id"]
 
-    def entries(self, limit: int = 30, include_undone: bool = True) -> List[Dict[str, Any]]:
+    def entries(self, limit: int = 30, include_undone: bool = True) -> list[dict[str, Any]]:
         with self._lock:
             items = list(self._load())
         if not include_undone:
@@ -949,7 +949,7 @@ class MutationJournal:
                     break
             self._save(entries)
 
-    def get(self, entry_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, entry_id: str) -> dict[str, Any] | None:
         for e in self._load():
             if e.get("id") == entry_id:
                 return e
@@ -963,7 +963,7 @@ class MutationJournal:
 # ── OEM COMPATIBILITY PROFILES (DATA-DRIVEN, NOT CODE BRANCHES) ──────────────
 OEM_PROFILES_PATH = os.path.join(DATA_DIR, "presets", "oem_profiles.json")
 
-DEFAULT_OEM_PROFILES: Dict[str, Dict[str, Any]] = {
+DEFAULT_OEM_PROFILES: dict[str, dict[str, Any]] = {
     "default": {
         "label": "Generic Android",
         "debloat_caution": "Keep system UI, telephony, package installer and settings packages.",
@@ -1008,10 +1008,10 @@ DEFAULT_OEM_PROFILES: Dict[str, Dict[str, Any]] = {
     },
 }
 
-_OEM_PROFILE_CACHE: Optional[Dict[str, Dict[str, Any]]] = None
+_OEM_PROFILE_CACHE: dict[str, dict[str, Any]] | None = None
 
 
-def load_oem_profiles() -> Dict[str, Dict[str, Any]]:
+def load_oem_profiles() -> dict[str, dict[str, Any]]:
     """Loads presets/oem_profiles.json, creating it with defaults on first run."""
     global _OEM_PROFILE_CACHE
     if _OEM_PROFILE_CACHE is not None:
@@ -1020,7 +1020,7 @@ def load_oem_profiles() -> Dict[str, Dict[str, Any]]:
     try:
         os.makedirs(os.path.dirname(OEM_PROFILES_PATH), exist_ok=True)
         if os.path.isfile(OEM_PROFILES_PATH):
-            with open(OEM_PROFILES_PATH, "r", encoding="utf-8") as f:
+            with open(OEM_PROFILES_PATH, encoding="utf-8") as f:
                 custom = json.load(f)
             if isinstance(custom, dict):
                 for key, val in custom.items():
@@ -1088,10 +1088,10 @@ class AppConfig(dict):
     def __setattr__(self, key: str, value: Any) -> None:
         self[key] = value
 
-    def model_dump(self) -> Dict[str, Any]:
+    def model_dump(self) -> dict[str, Any]:
         return dict(self)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return dict(self)
 
     @staticmethod
@@ -1134,7 +1134,7 @@ class AppConfig(dict):
 def load_config() -> AppConfig:
     if os.path.isfile(CONFIG_FILE):
         try:
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            with open(CONFIG_FILE, encoding='utf-8') as f:
                 cfg_dict = json.load(f)
                 return AppConfig(**cfg_dict)
         except json.JSONDecodeError:
@@ -1199,7 +1199,7 @@ def _seed_first_run_files():
         except Exception:
             pass
 
-def heal_layout(report: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def heal_layout(report: dict[str, Any] | None = None) -> dict[str, Any]:
     """Self-heal pass: folder contract, first-run files, and stale absolute paths.
 
     ``report`` lets a caller reuse the ensure_layout() pass the module already ran at
@@ -1210,7 +1210,7 @@ def heal_layout(report: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if report.get("created"):
         LOGGER.info("Created %d missing folder(s) under %s", len(report["created"]), DATA_DIR)
     _seed_first_run_files()
-    healed: List[str] = []
+    healed: list[str] = []
     try:
         cfg = load_config()
         changed = False
@@ -1234,7 +1234,7 @@ def heal_layout(report: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     return report
 
 
-def organize_device_storage() -> Dict[str, int]:
+def organize_device_storage() -> dict[str, int]:
     """
     Automated dynamic storage organization and self-healing engine.
     Scans exports, cache/device, screenshots, video, logs, and backups,
@@ -1243,7 +1243,7 @@ def organize_device_storage() -> Dict[str, int]:
     """
     # Device serials are discovered from the folders actually present on disk, so no
     # model or serial has to be hard-coded for storage organisation to work.
-    devices: Dict[str, str] = {}
+    devices: dict[str, str] = {}
     for cat in ("backups", "exports", "screenshots", "video", "logs", os.path.join("cache", "device")):
         cat_dir = os.path.join(DATA_DIR, cat)
         if os.path.isdir(cat_dir):
@@ -1371,7 +1371,7 @@ def _check_adb() -> bool:
             return True
     return False
 
-def _download_platform_tools(progress_callback: Optional[Callable[[str, float], None]] = None) -> bool:
+def _download_platform_tools(progress_callback: Callable[[str, float], None] | None = None) -> bool:
     adb_dir = os.path.join(TOOLS_DIR, 'adb')
     os.makedirs(adb_dir, exist_ok=True)
     os.makedirs(os.path.join(DATA_DIR, 'downloads'), exist_ok=True)
@@ -1411,12 +1411,12 @@ def _download_platform_tools(progress_callback: Optional[Callable[[str, float], 
             progress_callback(f"Download error: {e}", 0.0)
         return False
 
-def _scrcpy_asset_urls() -> List[str]:
+def _scrcpy_asset_urls() -> list[str]:
     """Newest-first scrcpy download URLs, resolved from the GitHub release API when possible.
 
     The pinned list is always appended as a fallback for offline/rate-limited machines.
     """
-    urls: List[str] = []
+    urls: list[str] = []
     if sys.platform == "win32":
         arch = (os.environ.get("PROCESSOR_ARCHITECTURE") or "").lower()
         prefix = "scrcpy-winarm64" if "arm64" in arch else (
@@ -1442,7 +1442,7 @@ def _scrcpy_asset_urls() -> List[str]:
     return list(dict.fromkeys(urls))
 
 
-def _ensure_scrcpy(progress_callback: Optional[Callable[[str, float], None]] = None) -> bool:
+def _ensure_scrcpy(progress_callback: Callable[[str, float], None] | None = None) -> bool:
     scrcpy_dir = os.path.join(TOOLS_DIR, 'scrcpy')
     os.makedirs(scrcpy_dir, exist_ok=True)
     os.makedirs(os.path.join(DATA_DIR, 'downloads'), exist_ok=True)
@@ -1518,7 +1518,7 @@ MANAGED_PY_PACKAGES = (
 AUTO_UPDATE_DEFAULT_INTERVAL_H = 24
 
 
-def _version_tuple(text: str) -> Tuple[int, ...]:
+def _version_tuple(text: str) -> tuple[int, ...]:
     return tuple(int(n) for n in re.findall(r'\d+', str(text))[:4])
 
 
@@ -1553,7 +1553,7 @@ def _pypi_latest_version(package: str) -> str:
         return ""
 
 
-def _pip_upgrade(package: str) -> Tuple[bool, str]:
+def _pip_upgrade(package: str) -> tuple[bool, str]:
     try:
         res = subprocess.run(
             [sys.executable, "-m", "pip", "install", "--upgrade", "--quiet",
@@ -1591,12 +1591,12 @@ def _google_platform_tools_version() -> str:
         req = urllib.request.Request(GOOGLE_REPOSITORY_XML, headers={"User-Agent": "ADB-AppControl"})
         with urllib.request.urlopen(req, timeout=12) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
-        block = re.search(r'<remotePackage path="platform-tools".*?</remotePackage>', raw, re.S)
+        block = re.search(r'<remotePackage path="platform-tools".*?</remotePackage>', raw, re.DOTALL)
         if not block:
             return ""
         rev = re.search(
             r'<revision>\s*<major>(\d+)</major>\s*<minor>(\d+)</minor>'
-            r'(?:\s*<micro>(\d+)</micro>)?', block.group(0), re.S)
+            r'(?:\s*<micro>(\d+)</micro>)?', block.group(0), re.DOTALL)
         if not rev:
             return ""
         return ".".join(part or "0" for part in rev.groups())
@@ -1621,7 +1621,7 @@ def _scrcpy_version_of(binary: str) -> str:
     try:
         res = subprocess.run([binary, "--version"], capture_output=True, text=True,
                              errors="replace", timeout=10, creationflags=CREATE_NO_WINDOW)
-        match = re.search(r'scrcpy\s+v?(\d+(?:\.\d+)*)', (res.stdout or "") + (res.stderr or ""), re.I)
+        match = re.search(r'scrcpy\s+v?(\d+(?:\.\d+)*)', (res.stdout or "") + (res.stderr or ""), re.IGNORECASE)
         return match.group(1) if match else ""
     except Exception:
         return ""
@@ -1652,7 +1652,7 @@ class AutoUpdater:
         self.config = config
         self.engine = engine
         self._lock = threading.Lock()
-        self._results: List[dict] = []
+        self._results: list[dict] = []
 
     def should_run(self) -> bool:
         cfg = self.config or {}
@@ -1672,7 +1672,7 @@ class AutoUpdater:
         return (time.time() - last) >= interval * 3600
 
     @property
-    def results(self) -> List[dict]:
+    def results(self) -> list[dict]:
         return list(self._results)
 
     def summarise(self, results=None) -> str:
@@ -1697,7 +1697,7 @@ class AutoUpdater:
             for r in rows
         )
 
-    def run(self, force: bool = False) -> List[dict]:
+    def run(self, force: bool = False) -> list[dict]:
         with self._lock:
             results = [self._update_python(), self._update_platform_tools(), self._update_scrcpy()]
             self._results = results
@@ -1824,7 +1824,7 @@ class AutoUpdater:
         return {**base, "action": "updated", "detail": "scrcpy/ replaced with the latest release"}
 
 
-_AUTO_UPDATER: Optional[AutoUpdater] = None
+_AUTO_UPDATER: AutoUpdater | None = None
 
 
 def get_auto_updater(config=None, engine=None) -> AutoUpdater:
@@ -1840,7 +1840,7 @@ def get_auto_updater(config=None, engine=None) -> AutoUpdater:
     return _AUTO_UPDATER
 
 
-def repair_tools(progress_callback: Optional[Callable[[str, float], None]] = None) -> Dict[str, bool]:
+def repair_tools(progress_callback: Callable[[str, float], None] | None = None) -> dict[str, bool]:
     """Restores a missing adb/scrcpy toolchain; user data is never touched."""
     report = {"adb": False, "scrcpy": False}
     if _check_adb():
@@ -1861,7 +1861,7 @@ def repair_tools(progress_callback: Optional[Callable[[str, float], None]] = Non
 _APP_LOCK_HANDLE: Any = None
 
 
-def acquire_single_instance_lock() -> Optional[str]:
+def acquire_single_instance_lock() -> str | None:
     """Prevents a second copy from rewriting the config/journal under the first one.
 
     Returns None when this process owns the lock, or a message when another copy runs.
@@ -1870,7 +1870,7 @@ def acquire_single_instance_lock() -> Optional[str]:
     lock_path = os.path.join(DATA_DIR, "config", "appcontrol.lock")
     try:
         os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-        handle = open(lock_path, "a+", encoding="utf-8")
+        handle = open(lock_path, "a+", encoding="utf-8")  # noqa: SIM115
     except OSError as e:
         LOGGER.warning("Instance lock unavailable (%s); continuing without it.", e)
         return None
@@ -1893,7 +1893,7 @@ def acquire_single_instance_lock() -> Optional[str]:
     return None
 
 
-def ensure_environment(progress_callback: Optional[Callable[[str, float], None]] = None) -> bool:
+def ensure_environment(progress_callback: Callable[[str, float], None] | None = None) -> bool:
     # The import-time pass already built the contract milliseconds ago; reusing its report
     # keeps startup to exactly one ensure_layout() run.
     heal_layout(LAYOUT_REPORT)
@@ -1911,8 +1911,8 @@ def ensure_environment(progress_callback: Optional[Callable[[str, float], None]]
 # Worker threads must never touch Tk. They hand callables to this one queue, and
 # the main window drains it on the Tk thread using Tk's own after() calls.
 _UI_QUEUE: "queue.Queue" = queue.Queue()
-_UI_ROOT: Optional[Any] = None
-_UI_THREAD_ID: Optional[int] = None
+_UI_ROOT: Any | None = None
+_UI_THREAD_ID: int | None = None
 
 
 def bind_ui_thread(root: Any) -> None:
@@ -1949,7 +1949,7 @@ def confirm_on_ui_thread(prompt: str, parent: Any = None, timeout: float = 60.0)
     root = _UI_ROOT
     if root is None:
         return False
-    answer: List[bool] = []
+    answer: list[bool] = []
     answered = threading.Event()
 
     def _ask():
@@ -1986,9 +1986,9 @@ class IconManager:
             w = 2
         self.max_workers = max(1, w)
         self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
-        self._pil_badge_cache: Dict[Tuple[str, str, int], Any] = {}
+        self._pil_badge_cache: dict[tuple[str, str, int], Any] = {}
 
-    def get_or_create_pil_badge(self, pkg: str, name: str, target_size: int = 24) -> Optional[Any]:
+    def get_or_create_pil_badge(self, pkg: str, name: str, target_size: int = 24) -> Any | None:
         if not HAS_PIL:
             return None
         icon_file = os.path.join(DATA_DIR, 'cache', 'icons', f"{pkg}.png")
@@ -2040,7 +2040,7 @@ class IconManager:
         except Exception:
             return False
 
-    def generate_all_icons(self, apps: List[Dict[str, Any]], target_size: int = 24, labels: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    def generate_all_icons(self, apps: list[dict[str, Any]], target_size: int = 24, labels: dict[str, str] | None = None) -> dict[str, str]:
         """Fast check for existing cached icons on disk without blocking or writing hundreds of files."""
         icons_dir = os.path.join(DATA_DIR, 'cache', 'icons')
         if not os.path.isdir(icons_dir):
@@ -2100,16 +2100,16 @@ class DataExporter:
 
     export_to_json = export_json
 
-    def export_csv(self, data: List[Dict[str, Any]], filename: str, serial: str = "", model: str = "") -> str:
+    def export_csv(self, data: list[dict[str, Any]], filename: str, serial: str = "", model: str = "") -> str:
         if not data:
             return f"No data provided for CSV export: {filename}"
         path = self._get_export_path(filename, serial=serial, model=model)
         try:
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
             # Union of keys across rows: heterogeneous records must not raise mid-export.
-            fieldnames: List[str] = []
+            fieldnames: list[str] = []
             for row in data:
-                for key in row.keys():
+                for key in row:
                     if key not in fieldnames:
                         fieldnames.append(key)
             with open(path, 'w', newline='', encoding='utf-8') as f:
@@ -2122,7 +2122,7 @@ class DataExporter:
 
     export_to_csv = export_csv
 
-    def export_html(self, data: List[Dict[str, Any]], filename: str, title: str = "Device Package Inventory", serial: str = "", model: str = "") -> str:
+    def export_html(self, data: list[dict[str, Any]], filename: str, title: str = "Device Package Inventory", serial: str = "", model: str = "") -> str:
         path = self._get_export_path(filename, serial=serial, model=model)
         try:
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
@@ -2131,7 +2131,7 @@ class DataExporter:
             for item in data:
                 tds = "".join(f"<td>{html.escape(str(item.get(h, '')))}</td>" for h in headers)
                 rows_html.append(f"<tr>{tds}</tr>")
-            
+
             html_content = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -2182,11 +2182,11 @@ class DebloatDatabase:
         'max': {'label': '🔴 Maximum', 'risk': 'High', 'desc': 'Core vendor apps and heavy services. Review carefully before applying!'}
     }
 
-    def __init__(self, custom_labels: Optional[Dict[str, str]] = None):
-        self.app_labels: Dict[str, str] = {}
-        self.db: Dict[str, Dict[str, str]] = {lvl: {} for lvl in self.LEVELS}
-        self.oem_presets: Dict[str, Dict[str, str]] = {}
-        self._humanized_cache: Dict[str, str] = {}
+    def __init__(self, custom_labels: dict[str, str] | None = None):
+        self.app_labels: dict[str, str] = {}
+        self.db: dict[str, dict[str, str]] = {lvl: {} for lvl in self.LEVELS}
+        self.oem_presets: dict[str, dict[str, str]] = {}
+        self._humanized_cache: dict[str, str] = {}
         self._load_presets()
         if custom_labels:
             self.app_labels.update(custom_labels)
@@ -2202,10 +2202,10 @@ class DebloatDatabase:
                 break
         self._populate_builtin_bloat()
 
-    def _parse_adac(self, filepath: str) -> Dict[str, str]:
-        parsed: Dict[str, str] = {}
+    def _parse_adac(self, filepath: str) -> dict[str, str]:
+        parsed: dict[str, str] = {}
         try:
-            with open(filepath, 'r', encoding='utf-8-sig', errors='ignore') as f:
+            with open(filepath, encoding='utf-8-sig', errors='ignore') as f:
                 content = f.read()
             if '\\+\\' in content or (content.count('|') > 5 and '\n' not in content[:300]):
                 parts = content.split('|')
@@ -2248,13 +2248,13 @@ class DebloatDatabase:
             LOGGER.warning("Failed parsing ADAC file %s: %s", filepath, e)
         return parsed
 
-    def parse_preset_file(self, filepath: str) -> Dict[str, str]:
-        result: Dict[str, str] = {}
+    def parse_preset_file(self, filepath: str) -> dict[str, str]:
+        result: dict[str, str] = {}
         if not os.path.isfile(filepath):
             return result
         try:
             if filepath.lower().endswith('.json'):
-                with open(filepath, 'r', encoding='utf-8-sig', errors='ignore') as fp:
+                with open(filepath, encoding='utf-8-sig', errors='ignore') as fp:
                     data = json.load(fp)
                 pkgs = data if isinstance(data, list) else data.get('packages', [])
                 if isinstance(pkgs, dict):
@@ -2386,11 +2386,11 @@ class DebloatDatabase:
                 if k not in self.app_labels:
                     self.app_labels[k] = v
 
-    def get_matched_apps(self, installed_pkgs: List[str], level: str = "safe") -> Dict[str, str]:
+    def get_matched_apps(self, installed_pkgs: list[str], level: str = "safe") -> dict[str, str]:
         target = self.db.get(level, {})
         return {p: target[p] for p in installed_pkgs if p in target}
 
-    def lookup(self, pkg: str) -> Optional[Dict[str, Any]]:
+    def lookup(self, pkg: str) -> dict[str, Any] | None:
         """Finds package classification in debloat database."""
         for lvl in ('basic', 'safe', 'medium', 'max'):
             if pkg in self.db.get(lvl, {}):
@@ -2414,7 +2414,7 @@ class DebloatDatabase:
             }
         return None
 
-    def get_package_bloat_info(self, pkg: str) -> Dict[str, Any]:
+    def get_package_bloat_info(self, pkg: str) -> dict[str, Any]:
         info = self.lookup(pkg)
         if info:
             return info
@@ -2439,9 +2439,9 @@ class DeviceOverview:
         name: str = "",
         device_model: str = "",
         android_version: str = "",
-        battery_level: Optional[int] = None,
+        battery_level: int | None = None,
         battery_status: str = "",
-        specs: Optional[Dict[str, str]] = None,
+        specs: dict[str, str] | None = None,
         transport_mode: str = "adb"
     ):
         self.serial = str(serial).strip()
@@ -2635,7 +2635,7 @@ class DeviceDatabase:
                 LOGGER.error("Failed to auto-heal database: %s", ex)
                 return False
 
-    def sync_packages(self, apps: List[Dict[str, Any]], debloat_db: Any = None) -> int:
+    def sync_packages(self, apps: list[dict[str, Any]], debloat_db: Any = None) -> int:
         """
         Atomically upserts a batch of scanned applications into the indexed SQLite cache.
         Runs in ~0.6ms for 350+ packages.
@@ -2704,7 +2704,7 @@ class DeviceDatabase:
                 LOGGER.warning("sync_packages DB error: %s", e)
                 return 0
 
-    def get_all_packages(self) -> List[Dict[str, Any]]:
+    def get_all_packages(self) -> list[dict[str, Any]]:
         """
         Retrieves all packages from indexed DB in sub-millisecond time.
         Format is drop-in compatible with list_all_packages.
@@ -2740,7 +2740,7 @@ class DeviceDatabase:
                 LOGGER.warning("get_all_packages DB query error: %s", e)
                 return []
 
-    def save_device_specs(self, specs: Dict[str, str]):
+    def save_device_specs(self, specs: dict[str, str]):
         """Persists device hardware specs and OS metrics into the device database."""
         with self._lock:
             try:
@@ -2752,7 +2752,7 @@ class DeviceDatabase:
             except Exception as e:
                 LOGGER.warning("save_device_specs error: %s", e)
 
-    def get_device_specs(self) -> Dict[str, str]:
+    def get_device_specs(self) -> dict[str, str]:
         """Returns cached device hardware specs and OS metrics."""
         with self._lock:
             try:
@@ -2787,7 +2787,7 @@ class BrainDatabase:
       - Auto-healing diagnostics, stack traces, and automated remediations
       - Multi-turn AI Copilot chat history & executed commands
     """
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         self.db_path = os.path.normpath(os.path.abspath(db_path or BRAIN_DB_PATH))
         self._lock = threading.RLock()
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
@@ -2903,7 +2903,7 @@ class BrainDatabase:
             try:
                 with self._get_connection() as conn:
                     cur = conn.execute(
-                        """INSERT INTO action_memory 
+                        """INSERT INTO action_memory
                            (timestamp, device_serial, device_model, category, action, target, command, status, return_code, duration_sec, response, error)
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (time.time(), device_serial, device_model, category, action, target, command, status, return_code, duration_sec, response[:1000], error[:1000])
@@ -2946,7 +2946,7 @@ class BrainDatabase:
             except Exception as e:
                 LOGGER.warning("BrainDatabase add_or_update_learning error: %s", e)
 
-    def get_learnings(self, category: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_learnings(self, category: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
         with self._lock:
             try:
                 with self._get_connection() as conn:
@@ -2978,14 +2978,14 @@ class BrainDatabase:
             try:
                 with self._get_connection() as conn:
                     conn.execute("""
-                        INSERT INTO problem_diagnostics 
+                        INSERT INTO problem_diagnostics
                         (timestamp, error_type, error_msg, traceback, diagnosed_cause, auto_healed, heal_action, duration_ms)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, (time.time(), error_type, error_msg[:500], traceback_str[:3000], diagnosed_cause[:500], 1 if auto_healed else 0, heal_action[:500], duration_ms))
             except Exception as e:
                 LOGGER.warning("BrainDatabase record_problem error: %s", e)
 
-    def get_problem_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def get_problem_history(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._lock:
             try:
                 with self._get_connection() as conn:
@@ -2997,7 +2997,7 @@ class BrainDatabase:
             except Exception:
                 return []
 
-    def save_chat_message(self, session_id: str, role: str, content: str, action_invoked: Optional[str] = None):
+    def save_chat_message(self, session_id: str, role: str, content: str, action_invoked: str | None = None):
         with self._lock:
             try:
                 with self._get_connection() as conn:
@@ -3008,7 +3008,7 @@ class BrainDatabase:
             except Exception as e:
                 LOGGER.warning("BrainDatabase save_chat_message error: %s", e)
 
-    def get_chat_history(self, session_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+    def get_chat_history(self, session_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         with self._lock:
             try:
                 with self._get_connection() as conn:
@@ -3064,19 +3064,19 @@ class AutoHealAgent:
     Applies deterministic diagnostic rules and leverages the local Gemma model to formulate
     automatic remediations so the application self-repairs with zero downtime.
     """
-    def __init__(self, brain_db: BrainDatabase, brain_engine: Optional[Any] = None):
+    def __init__(self, brain_db: BrainDatabase, brain_engine: Any | None = None):
         self.brain_db = brain_db
         self.brain_engine = brain_engine
-        self.listeners: List[Callable[[Dict[str, Any]], None]] = []
+        self.listeners: list[Callable[[dict[str, Any]], None]] = []
         self._lock = threading.Lock()
         self._last_ai_diag = 0.0
 
-    def subscribe(self, callback: Callable[[Dict[str, Any]], None]):
+    def subscribe(self, callback: Callable[[dict[str, Any]], None]):
         with self._lock:
             if callback not in self.listeners:
                 self.listeners.append(callback)
 
-    def _notify(self, event: Dict[str, Any]):
+    def _notify(self, event: dict[str, Any]):
         with self._lock:
             for cb in self.listeners:
                 try:
@@ -3089,8 +3089,8 @@ class AutoHealAgent:
         error_type: str,
         error_msg: str,
         traceback_str: str = "",
-        context: Optional[Dict[str, Any]] = None
-    ) -> Tuple[bool, str]:
+        context: dict[str, Any] | None = None
+    ) -> tuple[bool, str]:
         """
         Diagnoses an error and attempts automated remediation.
         Returns (success_bool, diagnosis_and_action_summary).
@@ -3272,16 +3272,16 @@ class ADBEngine:
         self.scrcpy_bin = self._find_scrcpy()
         self.acbridge_apk = self._find_acbridge()
 
-        self.current_device: Optional[DeviceOverview] = None
-        self.devices: List[DeviceOverview] = []
-        self._device_dbs: Dict[str, DeviceDatabase] = {}
+        self.current_device: DeviceOverview | None = None
+        self.devices: list[DeviceOverview] = []
+        self._device_dbs: dict[str, DeviceDatabase] = {}
         self._lock = threading.Lock()
-        self._perm_cache: Dict[Tuple[str, str], Tuple[float, Dict[str, List[str]]]] = {}
-        self._logcat_proc: Optional[subprocess.Popen] = None
+        self._perm_cache: dict[tuple[str, str], tuple[float, dict[str, list[str]]]] = {}
+        self._logcat_proc: subprocess.Popen | None = None
         self._logcat_running = False
         self.journal = MutationJournal()
 
-    def get_device_db(self, serial: str = "") -> Optional[DeviceDatabase]:
+    def get_device_db(self, serial: str = "") -> DeviceDatabase | None:
         """
         Retrieves or initializes the dedicated SQLite database for the target device.
         Auto-creates the device database file and ensures schema integrity in WAL mode.
@@ -3319,11 +3319,11 @@ class ADBEngine:
         return self.fastboot_bin
 
     @property
-    def scrcpy_path(self) -> Optional[str]:
+    def scrcpy_path(self) -> str | None:
         return self.scrcpy_bin
 
     @property
-    def acbridge_path(self) -> Optional[str]:
+    def acbridge_path(self) -> str | None:
         return self.acbridge_apk
 
     def _resolve_serial(self, serial: str = "") -> str:
@@ -3390,7 +3390,7 @@ class ADBEngine:
             os.makedirs(dev_dir, exist_ok=True)
         return dev_dir
 
-    def scan_all_device_backups(self, serial: str = "") -> List[Dict[str, Any]]:
+    def scan_all_device_backups(self, serial: str = "") -> list[dict[str, Any]]:
         """
         Discovers all backups under BASE_DIR/backups.
         Scans both device-specific subfolders (backups/<device_folder>/<backup_item>/)
@@ -3400,12 +3400,12 @@ class ADBEngine:
         backups_root = os.path.join(DATA_DIR, 'backups')
         if not os.path.isdir(backups_root):
             return []
-        
+
         target_s = self._resolve_serial(serial)
         target_safe_s = re.sub(r'[^A-Za-z0-9_.-]', '_', target_s).strip('_') if target_s else ""
         cur_serial = self.current_device.serial if self.current_device else ""
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
 
         def _inspect_folder(folder_path: str, dev_folder: str, item_id: str):
             if not os.path.isdir(folder_path):
@@ -3423,7 +3423,7 @@ class ADBEngine:
             meta_path = os.path.join(folder_path, "backup_info.json")
             if os.path.isfile(meta_path):
                 try:
-                    with open(meta_path, "r", encoding="utf-8") as mf:
+                    with open(meta_path, encoding="utf-8") as mf:
                         meta = json.load(mf)
                 except Exception:
                     pass
@@ -3463,7 +3463,7 @@ class ADBEngine:
             full_entry = os.path.join(backups_root, entry)
             if not os.path.isdir(full_entry):
                 continue
-            
+
             direct_apks = [f for f in os.listdir(full_entry) if f.endswith('.apk')]
             if direct_apks:
                 _inspect_folder(full_entry, "Legacy", entry)
@@ -3514,7 +3514,7 @@ class ADBEngine:
                 return os.path.abspath(which_p)
         return 'fastboot.exe' if sys.platform == 'win32' else 'fastboot'
 
-    def _find_scrcpy(self) -> Optional[str]:
+    def _find_scrcpy(self) -> str | None:
         exe_names = ['scrcpy.exe', 'scrcpy'] if sys.platform == 'win32' else ['scrcpy', 'scrcpy.exe']
         for exe in exe_names:
             candidates = [
@@ -3531,7 +3531,7 @@ class ADBEngine:
                 return os.path.abspath(which_p)
         return None
 
-    def _find_acbridge(self) -> Optional[str]:
+    def _find_acbridge(self) -> str | None:
         candidates = [
             os.path.join(TOOLS_DIR, 'adb', 'com.cybercat.acbridge.apk'),
             os.path.join(BASE_DIR, 'com.cybercat.acbridge.apk')
@@ -3541,7 +3541,7 @@ class ADBEngine:
                 return os.path.abspath(c)
         return None
 
-    def run_adb(self, args: List[str], timeout: int = 25, target_serial: str = "", audit: bool = True) -> Tuple[bool, str, str]:
+    def run_adb(self, args: list[str], timeout: int = 25, target_serial: str = "", audit: bool = True) -> tuple[bool, str, str]:
         cmd = [self.adbe_bin]
         serial = self._resolve_serial(target_serial)
 
@@ -3597,10 +3597,10 @@ class ADBEngine:
                 AUDIT_LOGGER.complete_action(rec, status="EXCEPTION", duration_sec=duration, return_code=-1, error=str(e))
             return False, "", str(e)
 
-    def run_shell(self, command: str, timeout: int = 25, target_serial: str = "", audit: bool = True) -> Tuple[bool, str, str]:
+    def run_shell(self, command: str, timeout: int = 25, target_serial: str = "", audit: bool = True) -> tuple[bool, str, str]:
         return self.run_adb(['shell', command], timeout=timeout, target_serial=target_serial, audit=audit)
 
-    def run_fastboot(self, args: List[str], timeout: int = 45, target_serial: str = "", audit: bool = True) -> Tuple[bool, str, str]:
+    def run_fastboot(self, args: list[str], timeout: int = 45, target_serial: str = "", audit: bool = True) -> tuple[bool, str, str]:
         cmd = [self.fastboot_bin]
         serial = target_serial or (
             self.current_device.serial if (self.current_device and self.current_device.state == "fastboot") else ""
@@ -3650,15 +3650,15 @@ class ADBEngine:
                 AUDIT_LOGGER.complete_action(rec, status="EXCEPTION", duration_sec=duration, return_code=-1, error=str(e))
             return False, "", str(e)
 
-    def restart_adb_server(self) -> Tuple[bool, str]:
+    def restart_adb_server(self) -> tuple[bool, str]:
         self.run_adb(['kill-server'], timeout=8)
         time.sleep(0.5)
         ok, out, err = self.run_adb(['start-server'], timeout=12)
         return ok, (out or err).strip() or "ADB Server restarted."
 
-    def quick_poll_devices(self) -> List[Tuple[str, str]]:
+    def quick_poll_devices(self) -> list[tuple[str, str]]:
         """Ultra-lightweight poll of connected ADB & Fastboot (serial, state) pairs."""
-        pairs: List[Tuple[str, str]] = []
+        pairs: list[tuple[str, str]] = []
         ok, out, _ = self.run_adb(['devices'], timeout=4, audit=False)
         if ok and out:
             for line in out.strip().splitlines()[1:]:
@@ -3673,12 +3673,12 @@ class ADBEngine:
                     pairs.append((parts[0], "fastboot"))
         return sorted(pairs)
 
-    def scan_devices(self, include_fastboot: bool = True) -> List[DeviceOverview]:
+    def scan_devices(self, include_fastboot: bool = True) -> list[DeviceOverview]:
         """
         Scans ADB devices (OS, Recovery, Sideload, Unauthorized) AND Fastboot devices
         using a single combined shell query per active device for zero lag.
         """
-        devices: List[DeviceOverview] = []
+        devices: list[DeviceOverview] = []
         ok, out, err = self.run_adb(['devices', '-l'], timeout=8)
         if ok and out:
             for line in out.strip().splitlines()[1:]:
@@ -3762,13 +3762,13 @@ class ADBEngine:
             self.devices = devices
             if self.current_device:
                 match = next((d for d in devices if d.serial == self.current_device.serial), None)
-                self.current_device = match if match else (devices[0] if devices else None)
+                self.current_device = match or (devices[0] if devices else None)
             elif devices:
                 self.current_device = devices[0]
 
         return devices
 
-    def scan_fastboot_devices(self) -> List[str]:
+    def scan_fastboot_devices(self) -> list[str]:
         ok, out, _ = self.run_fastboot(['devices'], timeout=5)
         if not ok or not out:
             return []
@@ -3780,12 +3780,12 @@ class ADBEngine:
         return serials
 
     # ── MTP & USB HARDWARE DIAGNOSTICS (WORKS EVEN WHEN ADB IS OFF/BRICKED) ───
-    def scan_mtp_usb_devices(self) -> List[Dict[str, str]]:
+    def scan_mtp_usb_devices(self) -> list[dict[str, str]]:
         """
         Detects connected MTP Portable Devices, Qualcomm EDL 9008, MediaTek Preloader/BROM,
         Samsung Odin, and ADB/Fastboot USB interfaces at the OS hardware level.
         """
-        found: List[Dict[str, str]] = []
+        found: list[dict[str, str]] = []
         if sys.platform == "win32":
             ps_cmd = (
                 "Get-PnpDevice -PresentOnly | Where-Object { "
@@ -3855,7 +3855,7 @@ class ADBEngine:
             return "Opened File Manager."
 
     # ── BOOTLOOP, UNBRICK, FASTBOOT & SIDELOAD RECOVERY SUITE ─────────────────
-    def get_fastboot_vars(self) -> Dict[str, str]:
+    def get_fastboot_vars(self) -> dict[str, str]:
         """Reads comprehensive bootloader variables from a device in Fastboot / Fastbootd mode."""
         info = {
             "product": "N/A",
@@ -3978,7 +3978,7 @@ class ADBEngine:
         return f"{desc}\nOutput: {(out or err).strip() or 'Success'}"
 
     # ── TELEMETRY & SPECS (SINGLE-TRIP SHELL CALLS) ───────────────────────────
-    def get_full_device_data(self, serial: str = "") -> Dict[str, Any]:
+    def get_full_device_data(self, serial: str = "") -> dict[str, Any]:
         target_s = self._resolve_serial(serial)
         if not target_s and not self.current_device:
             return {}
@@ -4006,7 +4006,7 @@ class ADBEngine:
                 "battery": battery_str
             }
 
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "serial": target_s,
             "device_model": model,
             "android_version": android_ver,
@@ -4058,7 +4058,7 @@ class ADBEngine:
 
         return data
 
-    def get_device_specs(self, serial: str = "") -> Dict[str, str]:
+    def get_device_specs(self, serial: str = "") -> dict[str, str]:
         target_s = self._resolve_serial(serial)
         full = self.get_full_device_data(target_s)
         cur = self.current_device
@@ -4108,21 +4108,21 @@ class ADBEngine:
         return specs
 
     # ── WIRELESS ADB & PAIRING ────────────────────────────────────────────────
-    def connect_wifi(self, ip: str, port: int = 5555) -> Tuple[bool, str]:
+    def connect_wifi(self, ip: str, port: int = 5555) -> tuple[bool, str]:
         target = f"{ip.strip()}:{port}" if ":" not in ip.strip() else ip.strip()
         ok, out, err = self.run_adb(['connect', target], timeout=12)
         res_text = (out + " " + err).strip()
         success = ok and ("connected to" in res_text.lower() or "already connected" in res_text.lower())
         return success, res_text
 
-    def pair_wifi(self, ip: str, port: int, pairing_code: str) -> Tuple[bool, str]:
+    def pair_wifi(self, ip: str, port: int, pairing_code: str) -> tuple[bool, str]:
         target = f"{ip.strip()}:{port}" if ":" not in ip.strip() else ip.strip()
         ok, out, err = self.run_adb(['pair', target, pairing_code.strip()], timeout=15)
         res_text = (out + " " + err).strip()
         success = ok and ("successfully paired" in res_text.lower())
         return success, res_text or "Pairing failed."
 
-    def enable_tcpip(self, port: int = 5555) -> Tuple[bool, str]:
+    def enable_tcpip(self, port: int = 5555) -> tuple[bool, str]:
         ok, out, err = self.run_adb(['tcpip', str(port)], timeout=10)
         res_text = (out + " " + err).strip()
         return ok, res_text or f"Restarting in TCP mode port: {port}"
@@ -4151,7 +4151,8 @@ class ADBEngine:
         combined = " ".join(x for x in ((out or "").strip(), (err or "").strip()) if x)
         if ok and "success" in combined.lower():
             return "AC Bridge installed successfully."
-        return f"Install Failed: {re.sub(r'^Performing Streamed Install\s*', '', combined).strip()}"
+        clean_msg = re.sub(r'^Performing Streamed Install\s*', '', combined).strip()
+        return f"Install Failed: {clean_msg}"
 
     # ── SCRCPY MIRRORING & SCREEN POWER ──────────────────────────────────────
     def scrcpy_version(self) -> str:
@@ -4176,7 +4177,7 @@ class ADBEngine:
         if not self.scrcpy_bin or not os.path.isfile(self.scrcpy_bin):
             return "Scrcpy binary not found. Place scrcpy in the scrcpy/ folder or system PATH."
 
-        args: List[str] = []
+        args: list[str] = []
         s = self._resolve_serial(serial)
         if s:
             args += ["-s", s]
@@ -4259,7 +4260,7 @@ class ADBEngine:
         return msg
 
     def backup_all_user_apks(self, dest_dir: str = "", serial: str = "",
-                             progress_callback: Optional[Callable[[str, float], None]] = None) -> Tuple[bool, str]:
+                             progress_callback: Callable[[str, float], None] | None = None) -> tuple[bool, str]:
         """Backs up the base APK of every user-installed app into device subfolder."""
         s = self._resolve_serial(serial)
         if not dest_dir:
@@ -4293,7 +4294,7 @@ class ADBEngine:
         return saved > 0, msg
 
     def save_logcat_dump(self, dest_path: str = "", lines: int = 2000, level: str = "V",
-                         serial: str = "") -> Tuple[bool, str]:
+                         serial: str = "") -> tuple[bool, str]:
         """Writes a one-shot logcat snapshot to disk."""
         s = self._resolve_serial(serial)
         try:
@@ -4319,7 +4320,7 @@ class ADBEngine:
             return False, f"Logcat dump failed: {text[:200]}"
         return True, f"Saved {len(text.splitlines())} logcat line(s) to {dest_path}"
 
-    def push_file(self, local_path: str, remote_path: str, serial: str = "") -> Tuple[bool, str]:
+    def push_file(self, local_path: str, remote_path: str, serial: str = "") -> tuple[bool, str]:
         """Uploads a local file to the device."""
         if not os.path.isfile(local_path):
             return False, f"Local file not found: {local_path}"
@@ -4328,7 +4329,7 @@ class ADBEngine:
         ok, out, err = self.run_adb(["push", local_path, remote_path], timeout=300, target_serial=serial)
         return ok, (out or err).strip() or "Push complete."
 
-    def pull_file(self, remote_path: str, local_path: str, serial: str = "") -> Tuple[bool, str]:
+    def pull_file(self, remote_path: str, local_path: str, serial: str = "") -> tuple[bool, str]:
         """Downloads a device file/folder to the PC."""
         remote = str(remote_path or "").strip()
         if not remote.startswith("/"):
@@ -4336,10 +4337,10 @@ class ADBEngine:
         ok, out, err = self.run_adb(["pull", remote, local_path], timeout=300, target_serial=serial)
         return ok, (out or err).strip() or "Pull complete."
 
-    def list_mdns_services(self) -> List[Dict[str, str]]:
+    def list_mdns_services(self) -> list[dict[str, str]]:
         """Lists wireless-debugging/pairing services advertised over mDNS."""
         ok, out, _ = self.run_adb(["mdns", "services"], timeout=8)
-        services: List[Dict[str, str]] = []
+        services: list[dict[str, str]] = []
         if not ok or not out:
             return services
         for line in out.strip().splitlines():
@@ -4352,7 +4353,7 @@ class ADBEngine:
         return services
 
     # ── ULTRA-FAST SINGLE-TRIP PACKAGE LISTING ────────────────────────────────
-    def list_all_packages(self, serial: str = "") -> List[Dict[str, Any]]:
+    def list_all_packages(self, serial: str = "") -> list[dict[str, Any]]:
         s = self._resolve_serial(serial)
         if not s:
             return []
@@ -4389,26 +4390,26 @@ class ADBEngine:
             _, dis_out, _ = self.run_shell("pm list packages -d", timeout=12, target_serial=s)
             _, sys_out, _ = self.run_shell("pm list packages -s -u", timeout=12, target_serial=s)
 
-        installed_set: Set[str] = set()
+        installed_set: set[str] = set()
         for line in out_inst.strip().splitlines():
             line = line.strip()
             if line.startswith("package:"):
                 installed_set.add(line.split(":", 1)[1].strip())
 
-        disabled_set: Set[str] = set()
+        disabled_set: set[str] = set()
         for line in dis_out.strip().splitlines():
             line = line.strip()
             if line.startswith("package:"):
                 disabled_set.add(line.split(":", 1)[1].strip())
 
-        system_set: Set[str] = set()
+        system_set: set[str] = set()
         for line in sys_out.strip().splitlines():
             line = line.strip()
             if line.startswith("package:"):
                 system_set.add(line.split(":", 1)[1].strip())
 
-        apps: List[Dict[str, Any]] = []
-        seen_pkgs: Set[str] = set()
+        apps: list[dict[str, Any]] = []
+        seen_pkgs: set[str] = set()
         for line in out_all.strip().splitlines():
             line = line.strip()
             if not line.startswith("package:"):
@@ -4473,7 +4474,7 @@ class ADBEngine:
             return "enabled"
         return "absent"
 
-    def _permission_granted(self, pkg: str, perm: str, serial: str = "") -> Optional[bool]:
+    def _permission_granted(self, pkg: str, perm: str, serial: str = "") -> bool | None:
         """Device-reported permission state: True, False, or None when unknown."""
         s = self._resolve_serial(serial)
         cmd = f"dumpsys package {_pkg_arg(pkg)} | grep -F '{perm}:' | head -n 1"
@@ -4665,13 +4666,13 @@ class ADBEngine:
             LOGGER.debug("Journal record failed for uninstall %s: %s", pkg, e)
 
     # ── SAFETY: UNDO JOURNAL, CACHE HYGIENE, DIAGNOSTICS, OEM PROFILE ─────────
-    def plan_package_actions(self, action: str, packages: List[str], serial: str = "") -> List[Dict[str, str]]:
+    def plan_package_actions(self, action: str, packages: list[str], serial: str = "") -> list[dict[str, str]]:
         """Describes what a batch would do, and how to undo it, without changing the device."""
         s = self._resolve_serial(serial)
         action = (action or "").strip().lower()
         if action not in ("disable", "hide", "uninstall", "restore"):
             raise ValueError(f"Unsupported action '{action}'")
-        steps: List[Dict[str, str]] = []
+        steps: list[dict[str, str]] = []
         for pkg in packages:
             pk = _pkg_arg(pkg)
             state = self._pkg_state(pkg, s)
@@ -4696,10 +4697,10 @@ class ADBEngine:
             })
         return steps
 
-    def get_pending_mutations(self, limit: int = 30) -> List[Dict[str, Any]]:
+    def get_pending_mutations(self, limit: int = 30) -> list[dict[str, Any]]:
         return self.journal.entries(limit=limit, include_undone=False)
 
-    def undo_mutation(self, entry_id: str) -> Tuple[bool, str]:
+    def undo_mutation(self, entry_id: str) -> tuple[bool, str]:
         """Runs the inverse command of one journal entry on the device it came from."""
         entry = self.journal.get(entry_id)
         if not entry:
@@ -4731,15 +4732,15 @@ class ADBEngine:
         label = entry.get("label") or entry.get("package")
         return (not failed), f"{label}: {text}"
 
-    def undo_last_mutation(self) -> Tuple[bool, str]:
+    def undo_last_mutation(self) -> tuple[bool, str]:
         pending = self.journal.entries(limit=1, include_undone=False)
         if not pending:
             return False, "Nothing to undo — the safety journal has no pending actions."
         return self.undo_mutation(pending[0]["id"])
 
-    def cache_report(self) -> Dict[str, Dict[str, int]]:
+    def cache_report(self) -> dict[str, dict[str, int]]:
         """Returns {subfolder: {files, bytes}} for the app's cache directory."""
-        report: Dict[str, Dict[str, int]] = {}
+        report: dict[str, dict[str, int]] = {}
         cache_root = os.path.join(DATA_DIR, "cache")
         if not os.path.isdir(cache_root):
             return report
@@ -4758,12 +4759,12 @@ class ADBEngine:
             report[entry] = {"files": files, "bytes": size}
         return report
 
-    def prune_cache(self, target_mb: int = 250) -> Tuple[bool, str]:
+    def prune_cache(self, target_mb: int = 250) -> tuple[bool, str]:
         """Deletes the oldest cached files until the cache fits the budget."""
         cache_root = os.path.join(DATA_DIR, "cache")
         if not os.path.isdir(cache_root):
             return True, "No cache directory to clean."
-        files: List[Tuple[float, int, str]] = []
+        files: list[tuple[float, int, str]] = []
         for root_d, _dirs, names in os.walk(cache_root):
             for n in names:
                 p = os.path.join(root_d, n)
@@ -4795,7 +4796,7 @@ class ADBEngine:
                 pass
         return True, f"Removed {removed} cached file(s), freed {freed / 1048576:.1f} MB."
 
-    def export_diagnostics_bundle(self, dest_path: str = "") -> Tuple[bool, str]:
+    def export_diagnostics_bundle(self, dest_path: str = "") -> tuple[bool, str]:
         """Writes a sanitised zip (logs, config, versions, journal) for bug reports."""
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         if not dest_path:
@@ -4810,7 +4811,7 @@ class ADBEngine:
                         if os.path.isfile(p):
                             zf.write(p, f"logs/{name}")
                 if os.path.isfile(CONFIG_FILE):
-                    with open(CONFIG_FILE, "r", encoding="utf-8", errors="ignore") as f:
+                    with open(CONFIG_FILE, encoding="utf-8", errors="ignore") as f:
                         cfg = json.load(f)
                     if isinstance(cfg, dict):
                         for secret_key in ("key_protect_hash",):
@@ -4840,7 +4841,7 @@ class ADBEngine:
         except Exception as e:
             return False, f"Could not build diagnostics bundle: {e}"
 
-    def get_oem_profile(self, serial: str = "") -> Dict[str, Any]:
+    def get_oem_profile(self, serial: str = "") -> dict[str, Any]:
         """Matches the connected device to a data-driven OEM compatibility profile."""
         s = self._resolve_serial(serial)
         manufacturer = brand = release = model = ""
@@ -4907,7 +4908,7 @@ class ADBEngine:
         ok, out, err = self.run_shell(f"am start -n {shlex.quote(comp)}", timeout=12, target_serial=s)
         return (out or err).strip()
 
-    def backup_apk(self, pkg: str, dest_dir: str = "", serial: str = "") -> Tuple[bool, str]:
+    def backup_apk(self, pkg: str, dest_dir: str = "", serial: str = "") -> tuple[bool, str]:
         s = self._resolve_serial(serial)
         if not s and not self.current_device:
             return False, "No device connected"
@@ -4951,7 +4952,7 @@ class ADBEngine:
         saved = 0
         first_local_apk = None
         pulled_files = []
-        file_meta: List[Dict[str, Any]] = []
+        file_meta: list[dict[str, Any]] = []
         for idx, p in enumerate(paths):
             filename = os.path.basename(p)
             if not filename.endswith('.apk'):
@@ -4994,20 +4995,20 @@ class ADBEngine:
             return True, f"Successfully extracted {saved} APK(s) to {dest_dir}"
         return False, "Extraction failed"
 
-    def verify_backup(self, folder: str) -> Tuple[bool, str]:
+    def verify_backup(self, folder: str) -> tuple[bool, str]:
         """Checks every APK recorded in backup_info.json against its size and SHA-256."""
         info_path = os.path.join(folder, "backup_info.json")
         if not os.path.isfile(info_path):
             return False, "No backup_info.json here (legacy backup — nothing to verify)."
         try:
-            with open(info_path, "r", encoding="utf-8") as f:
+            with open(info_path, encoding="utf-8") as f:
                 meta = json.load(f)
         except Exception as e:
             return False, f"Unreadable backup_info.json: {e}"
         files = meta.get("files") or []
         if not files:
             return False, "This backup predates checksums — re-backup it to verify."
-        problems: List[str] = []
+        problems: list[str] = []
         for rec in files:
             name = str(rec.get("name") or "")
             path = os.path.join(folder, name)
@@ -5021,7 +5022,7 @@ class ADBEngine:
             return False, "Backup verification failed: " + "; ".join(problems[:6])
         return True, f"Verified {len(files)} APK(s) against their recorded SHA-256."
 
-    def prune_generated_files(self, keep: int = 20) -> Tuple[int, str]:
+    def prune_generated_files(self, keep: int = 20) -> tuple[int, str]:
         """Keeps the newest ``keep`` logcat dumps / screenshots / videos per device folder."""
         try:
             keep = max(1, int(keep))
@@ -5061,8 +5062,8 @@ class ADBEngine:
                         continue
         return removed, f"Pruned {removed} generated file(s), freed {freed / 1048576:.1f} MB."
 
-    def inspect_local_apk(self, file_path: str) -> Dict[str, Any]:
-        info: Dict[str, Any] = {
+    def inspect_local_apk(self, file_path: str) -> dict[str, Any]:
+        info: dict[str, Any] = {
             "file_name": os.path.basename(file_path),
             "file_path": file_path,
             "size_mb": round(os.path.getsize(file_path) / (1024 * 1024), 2) if os.path.isfile(file_path) else 0.0,
@@ -5121,14 +5122,14 @@ class ADBEngine:
 
     def install_apks(
         self,
-        apk_paths: List[str],
+        apk_paths: list[str],
         replace: bool = True,
         downgrade: bool = False,
         grant_perms: bool = True,
         test_pkg: bool = False,
         as_split_group: bool = False,
         serial: str = "",
-        progress_callback: Optional[Callable[[str, float], None]] = None,
+        progress_callback: Callable[[str, float], None] | None = None,
     ) -> str:
         if not apk_paths:
             return "No APK files specified."
@@ -5185,7 +5186,7 @@ class ADBEngine:
         _report("Install finished", total_parts)
         return "\n".join(results)
 
-    def _install_bundle_archive(self, archive_path: str, flags: List[str], serial: str = "") -> str:
+    def _install_bundle_archive(self, archive_path: str, flags: list[str], serial: str = "") -> str:
         tmp_dir = os.path.join(DATA_DIR, 'cache', 'apk', f"bundle_{int(time.time() * 1000)}")
         os.makedirs(tmp_dir, exist_ok=True)
         try:
@@ -5214,7 +5215,7 @@ class ADBEngine:
                 manifest_p = os.path.join(tmp_dir, 'manifest.json')
                 if os.path.isfile(manifest_p):
                     try:
-                        with open(manifest_p, 'r', encoding='utf-8', errors='ignore') as mf:
+                        with open(manifest_p, encoding='utf-8', errors='ignore') as mf:
                             pkg_name = json.load(mf).get('package_name', '')
                     except Exception as e:
                         LOGGER.debug("manifest.json parse failed (OBB push will guess the package): %s", e)
@@ -5239,12 +5240,12 @@ class ADBEngine:
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    def get_package_details_structured(self, pkg: str, serial: str = "") -> Dict[str, Any]:
+    def get_package_details_structured(self, pkg: str, serial: str = "") -> dict[str, Any]:
         s = self._resolve_serial(serial)
         ok, out, err = self.run_shell(f"dumpsys package {_pkg_arg(pkg)}", timeout=18, target_serial=s)
         raw = out if ok else f"Error retrieving package info: {err}"
 
-        parsed: Dict[str, Any] = {
+        parsed: dict[str, Any] = {
             "package": pkg,
             "version_name": "N/A",
             "version_code": "N/A",
@@ -5285,7 +5286,7 @@ class ADBEngine:
         m_tar = re.search(r'targetSdk=(\d+)', out)
         if m_tar: parsed["target_sdk"] = m_tar.group(1)
 
-        perms_map: Dict[str, bool] = {}
+        perms_map: dict[str, bool] = {}
         for line in out.splitlines():
             line_s = line.strip()
             if ": granted=" in line_s and "." in line_s:
@@ -5309,7 +5310,7 @@ class ADBEngine:
 
         return parsed
 
-    def show_app_details(self, pkg: str, on_refresh: Optional[Callable[[], None]] = None):
+    def show_app_details(self, pkg: str, on_refresh: Callable[[], None] | None = None):
         win = ctk.CTkToplevel()
         win.title(f"Application Inspector — {pkg}")
         win.geometry("820x620")
@@ -5444,15 +5445,15 @@ class ADBEngine:
         return (out or err).strip()
 
     # ── PERMISSIONS ENGINE ────────────────────────────────────────────────────
-    def scan_all_permissions_for(self, perm_str: str, serial: str = "") -> Dict[str, List[str]]:
+    def scan_all_permissions_for(self, perm_str: str, serial: str = "") -> dict[str, list[str]]:
         s = self._resolve_serial(serial)
         cache_key = (s, perm_str)
         cached = self._perm_cache.get(cache_key)
         if cached and (time.time() - cached[0]) < 90:
             return {k: list(v) for k, v in cached[1].items()}
 
-        granted: List[str] = []
-        revoked: List[str] = []
+        granted: list[str] = []
+        revoked: list[str] = []
 
         ok, out, _ = self.run_shell("dumpsys package", timeout=60, target_serial=s)
         if not ok or not out:
@@ -5502,7 +5503,7 @@ class ADBEngine:
             for line in (inst or "").splitlines() if line.startswith("package:")
         }
         known = set(granted) | set(revoked)
-        result: Dict[str, List[str]] = {
+        result: dict[str, list[str]] = {
             "granted": sorted(set(granted)),
             "revoked": sorted(set(revoked)),
             "not_requested": sorted(installed - known),
@@ -5515,9 +5516,9 @@ class ADBEngine:
     MAGISK_RELEASE_API = "https://api.github.com/repos/topjohnwu/Magisk/releases/latest"
 
     @staticmethod
-    def _parse_kv_shell(out: str) -> Dict[str, str]:
+    def _parse_kv_shell(out: str) -> dict[str, str]:
         """Parses `KEY=value` shell output into a dict (used by the root diagnostic)."""
-        data: Dict[str, str] = {}
+        data: dict[str, str] = {}
         for line in (out or "").splitlines():
             if "=" not in line:
                 continue
@@ -5527,7 +5528,7 @@ class ADBEngine:
                 data[key] = value.strip()
         return data
 
-    def get_declared_permissions(self, pkg: str, serial: str = "") -> Set[str]:
+    def get_declared_permissions(self, pkg: str, serial: str = "") -> set[str]:
         """Permissions the package actually declares (requested manifest entries)."""
         s = self._resolve_serial(serial)
         ok, out, _ = self.run_shell(f"dumpsys package {_pkg_arg(pkg)}", timeout=15, target_serial=s)
@@ -5609,7 +5610,7 @@ class ADBEngine:
         except Exception as e:
             LOGGER.debug("Journal record failed for %s %s: %s", action, perm, e)
 
-    def auto_grant_all_permissions(self, pkg: str, serial: str = "") -> Tuple[int, int]:
+    def auto_grant_all_permissions(self, pkg: str, serial: str = "") -> tuple[int, int]:
         """Grants every runtime (dangerous) permission the package declares.
 
         Signature, privileged and normal permissions can never be granted with `pm grant`
@@ -5694,10 +5695,10 @@ class ADBEngine:
             )
         return "\n".join(lines)
 
-    def get_root_status(self, serial: str = "") -> Dict[str, Any]:
+    def get_root_status(self, serial: str = "") -> dict[str, Any]:
         """Collects everything needed to decide how a device can be rooted."""
         s = self._resolve_serial(serial)
-        info: Dict[str, Any] = {
+        info: dict[str, Any] = {
             "serial": s, "rooted": False, "su_path": "", "root_id": "",
             "magisk_version": "", "brand": "", "model": "", "soc": "",
             "bootloader": "unknown", "oem_unlock_allowed": "unknown",
@@ -5794,7 +5795,7 @@ class ADBEngine:
             (['flashing', 'unlock'], "Unlock requested - confirm on the phone screen."),
             (['oem', 'unlock'], "Legacy OEM unlock requested - confirm on the phone screen."),
         )
-        errors: List[str] = []
+        errors: list[str] = []
         for args, success_msg in attempts:
             ok, out, err = self.run_fastboot(args, timeout=60, target_serial=serial)
             text = ((out or "") + " " + (err or "")).strip()
@@ -5843,7 +5844,8 @@ class ADBEngine:
         if ok and "success" in combined.lower():
             label = f"Magisk {tag} installed" if tag else "Magisk installed"
             return f"{label}. Open it once, then patch this device's boot image."
-        return f"Magisk install failed: {re.sub(r'^Performing Streamed Install\s*', '', combined).strip()}"
+        clean_msg = re.sub(r'^Performing Streamed Install\s*', '', combined).strip()
+        return f"Magisk install failed: {clean_msg}"
 
     def one_click_root(self, allow_unlock: bool = False, serial: str = "") -> str:
         """Automates every rooting step that can be done safely without a device image.
@@ -5909,13 +5911,13 @@ class ADBEngine:
         return "\n".join(lines)
 
     # ── PROCESS, RAM, STORAGE & BATTERY TELEMETRY ─────────────────────────────
-    def get_ram_overview(self, serial: str = "") -> Dict[str, str]:
+    def get_ram_overview(self, serial: str = "") -> dict[str, str]:
         s = self._resolve_serial(serial)
         ok, out, _ = self.run_shell("cat /proc/meminfo", timeout=6, target_serial=s)
         return self._parse_meminfo(out if ok else "")
 
     @staticmethod
-    def _parse_meminfo(out: str) -> Dict[str, str]:
+    def _parse_meminfo(out: str) -> dict[str, str]:
         data = {'total': 'N/A', 'available': 'N/A', 'free': 'N/A', 'cached': 'N/A'}
         if not out:
             return data
@@ -5934,13 +5936,13 @@ class ADBEngine:
                     elif k == 'Cached': data['cached'] = _to_mb(kb)
         return data
 
-    def get_storage_overview(self, serial: str = "") -> Dict[str, str]:
+    def get_storage_overview(self, serial: str = "") -> dict[str, str]:
         s = self._resolve_serial(serial)
         ok, out, _ = self.run_shell("df -h /data 2>/dev/null || df /data", timeout=6, target_serial=s)
         return self._parse_df(out if ok else "")
 
     @staticmethod
-    def _parse_df(out: str) -> Dict[str, str]:
+    def _parse_df(out: str) -> dict[str, str]:
         info = {"total": "N/A", "used": "N/A", "free": "N/A", "percent": "N/A"}
         if not out:
             return info
@@ -5958,13 +5960,13 @@ class ADBEngine:
                 info["total"], info["used"], info["free"], info["percent"] = parts[1], parts[2], parts[3], parts[4]
         return info
 
-    def get_battery_details(self, serial: str = "") -> Dict[str, str]:
+    def get_battery_details(self, serial: str = "") -> dict[str, str]:
         s = self._resolve_serial(serial)
         ok, out, _ = self.run_shell("dumpsys battery", timeout=6, target_serial=s)
         return self._parse_battery(out if ok else "")
 
     @staticmethod
-    def _parse_battery(out: str) -> Dict[str, str]:
+    def _parse_battery(out: str) -> dict[str, str]:
         info = {"level": "N/A", "temp": "N/A", "voltage": "N/A", "status": "Unknown", "health": "Good"}
         if not out:
             return info
@@ -6007,13 +6009,13 @@ class ADBEngine:
 
         return info
 
-    def get_process_list(self, serial: str = "") -> List[Dict[str, Any]]:
+    def get_process_list(self, serial: str = "") -> list[dict[str, Any]]:
         s = self._resolve_serial(serial)
         ok, out, _ = self.run_shell("ps -A -o PID,USER,RSS,NAME 2>/dev/null || ps", timeout=10, target_serial=s)
         return self._parse_ps(out if ok else "")
 
     @staticmethod
-    def _parse_ps(out: str) -> List[Dict[str, Any]]:
+    def _parse_ps(out: str) -> list[dict[str, Any]]:
         if not out:
             return []
         lines = [l for l in out.strip().splitlines() if l.strip()]
@@ -6026,7 +6028,7 @@ class ADBEngine:
         name_idx = -1
         max_idx = max(pid_idx, user_idx, rss_idx)
 
-        procs: List[Dict[str, Any]] = []
+        procs: list[dict[str, Any]] = []
         for line in lines[1:]:
             parts = line.split()
             if len(parts) > max_idx:
@@ -6042,7 +6044,7 @@ class ADBEngine:
                 })
         return procs
 
-    def get_combined_process_telemetry(self, serial: str = "") -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str], List[Dict[str, Any]]]:
+    def get_combined_process_telemetry(self, serial: str = "") -> tuple[dict[str, str], dict[str, str], dict[str, str], list[dict[str, Any]]]:
         """Single-trip compound shell query for RAM, Storage, Battery, and Process list."""
         s = self._resolve_serial(serial)
         cmd = (
@@ -6093,7 +6095,7 @@ class ADBEngine:
         return "Background processes killed and cached data trimmed."
 
     # ── DEVICE FILE EXPLORER ENGINE ───────────────────────────────────────────
-    def list_remote_dir(self, remote_path: str = "/sdcard", serial: str = "") -> List[Dict[str, Any]]:
+    def list_remote_dir(self, remote_path: str = "/sdcard", serial: str = "") -> list[dict[str, Any]]:
         s = self._resolve_serial(serial)
         clean_path = remote_path.rstrip('/') or "/"
         quoted = _remote_path(clean_path)
@@ -6106,7 +6108,7 @@ class ADBEngine:
         if not ok or not out:
             return []
 
-        entries: List[Dict[str, Any]] = []
+        entries: list[dict[str, Any]] = []
         for line in out.strip().splitlines():
             line = line.strip()
             if not line or line.startswith("total "):
@@ -6149,12 +6151,12 @@ class ADBEngine:
         entries.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
         return entries
 
-    def mkdir_remote(self, remote_path: str, serial: str = "") -> Tuple[bool, str]:
+    def mkdir_remote(self, remote_path: str, serial: str = "") -> tuple[bool, str]:
         s = self._resolve_serial(serial)
         ok, out, err = self.run_shell(f"mkdir -p {_remote_path(remote_path)}", timeout=8, target_serial=s)
         return ok, (out or err).strip() or f"Created folder {remote_path}"
 
-    def delete_remote(self, remote_path: str, serial: str = "") -> Tuple[bool, str]:
+    def delete_remote(self, remote_path: str, serial: str = "") -> tuple[bool, str]:
         s = self._resolve_serial(serial)
         target = str(remote_path or "").strip().rstrip("/")
         protected = {"/", "/sdcard", "/storage", "/storage/emulated", "/data", "/system",
@@ -6164,12 +6166,12 @@ class ADBEngine:
         ok, out, err = self.run_shell(f"rm -rf {_remote_path(target)}", timeout=15, target_serial=s)
         return ok, (out or err).strip() or f"Deleted {remote_path}"
 
-    def rename_remote(self, old_path: str, new_path: str, serial: str = "") -> Tuple[bool, str]:
+    def rename_remote(self, old_path: str, new_path: str, serial: str = "") -> tuple[bool, str]:
         s = self._resolve_serial(serial)
         ok, out, err = self.run_shell(f"mv {_remote_path(old_path)} {_remote_path(new_path)}", timeout=8, target_serial=s)
         return ok, (out or err).strip() or f"Renamed to {os.path.basename(new_path)}"
 
-    def chmod_remote(self, remote_path: str, mode: str = "755", serial: str = "") -> Tuple[bool, str]:
+    def chmod_remote(self, remote_path: str, mode: str = "755", serial: str = "") -> tuple[bool, str]:
         s = self._resolve_serial(serial)
         mode = str(mode or "").strip()
         if not re.fullmatch(r'[0-7]{3,4}', mode):
@@ -6249,7 +6251,7 @@ class ADBEngine:
             return f"Recording failed: {err or 'no video data could be pulled from the device'}"
         return f"Video recorded successfully:\n{dest_path}"
 
-    def send_key(self, keycode: Union[str, int], serial: str = "") -> str:
+    def send_key(self, keycode: str | int, serial: str = "") -> str:
         s = self._resolve_serial(serial)
         key = str(keycode).strip()
         if not (key.isdigit() or re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*', key)):
@@ -6334,7 +6336,7 @@ class ADBEngine:
             "or a clipper companion app). Nothing was changed on the device."
         )
 
-    def get_display_scaling_info(self, serial: str = "") -> Dict[str, str]:
+    def get_display_scaling_info(self, serial: str = "") -> dict[str, str]:
         s = self._resolve_serial(serial)
         info = {"physical_size": "", "active_size": "", "physical_density": "", "active_density": ""}
         ok, out, _ = self.run_shell("wm size; wm density", timeout=6, target_serial=s)
@@ -6509,15 +6511,15 @@ class AppStateStore:
         self._adb_path = self._config.get('adb_path', '')
         self._adb_engine = ADBEngine(self._adb_path)
         self._debloat_db = DebloatDatabase(custom_labels=self._config.get('app_labels', {}))
-        self._listeners: List[Any] = []
-        self._view_map: Dict[str, Any] = {}
-        self._dirty_views: Set[str] = set()
+        self._listeners: list[Any] = []
+        self._view_map: dict[str, Any] = {}
+        self._dirty_views: set[str] = set()
         self._active_page_key: str = "apps"
-        self._refresh_callback: Optional[Callable[[], None]] = None
+        self._refresh_callback: Callable[[], None] | None = None
         # Long-running work reports through here; the main window binds itself to
         # render the footer bar, the right-panel task card and live console lines.
-        self.progress: Optional[Any] = None
-        self._state: Dict[str, Any] = {
+        self.progress: Any | None = None
+        self._state: dict[str, Any] = {
             "config": self._config,
             "device_list": [],
             "current_device": None,
@@ -6553,12 +6555,12 @@ class AppStateStore:
         if self.progress:
             self.progress.end_task(label)
 
-    def report_progress(self, label: str, fraction: Optional[float] = None):
+    def report_progress(self, label: str, fraction: float | None = None):
         if self.progress:
             self.progress.report_progress(label, fraction)
 
     @property
-    def current_device(self) -> Optional[DeviceOverview]:
+    def current_device(self) -> DeviceOverview | None:
         return self._state.get("current_device")
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -6590,13 +6592,13 @@ class AppStateStore:
             except Exception as e:
                 LOGGER.debug("Refresh callback error: %s", e)
 
-    def get_device_list(self) -> List[DeviceOverview]:
+    def get_device_list(self) -> list[DeviceOverview]:
         return self._state.get("device_list", [])
 
-    def get_current_device(self) -> Optional[DeviceOverview]:
+    def get_current_device(self) -> DeviceOverview | None:
         return self._state.get("current_device")
 
-    def get_all_apps(self) -> List[Dict[str, Any]]:
+    def get_all_apps(self) -> list[dict[str, Any]]:
         return self._state.get("all_apps", [])
 
     def set_loading_status(self, status: str, busy: bool = False):
@@ -6612,7 +6614,7 @@ class AppStateStore:
     def is_acbridge_ready(self) -> bool:
         return bool(self._state.get("acbridge_installed", False))
 
-    def batch_update_scan_results(self, devices: List[DeviceOverview], apps: List[Dict[str, Any]], is_bridge: bool):
+    def batch_update_scan_results(self, devices: list[DeviceOverview], apps: list[dict[str, Any]], is_bridge: bool):
         """Updates devices, apps, and bridge status in a SINGLE atomic notification pass."""
         self._state["acbridge_installed"] = bool(is_bridge)
         self._state["device_list"] = devices
@@ -6634,7 +6636,7 @@ class AppStateStore:
         self._state["all_apps"] = apps
         self.notify_listeners()
 
-    def set_current_device(self, device: Optional[DeviceOverview]):
+    def set_current_device(self, device: DeviceOverview | None):
         self._state["current_device"] = device
         self._adb_engine.current_device = device
         if device:
@@ -6648,11 +6650,11 @@ class AppStateStore:
                         self._state["all_apps"] = cached_apps
         self.notify_listeners()
 
-    def update_app_data(self, apps: List[Dict[str, Any]]):
+    def update_app_data(self, apps: list[dict[str, Any]]):
         self._state["all_apps"] = apps
         self.notify_listeners()
 
-    def update_icon_cache(self, path_map: Dict[str, str]):
+    def update_icon_cache(self, path_map: dict[str, str]):
         self._state["icon_paths"].update(path_map)
 
     def set_custom_app_label(self, pkg: str, label: str):
@@ -6713,10 +6715,10 @@ class AIBrainEngine:
     """
     def __init__(
         self,
-        model_path: Optional[str] = None,
-        db_path: Optional[str] = None,
+        model_path: str | None = None,
+        db_path: str | None = None,
         port: int = 8089,
-        on_status_change: Optional[Callable[[str, bool], None]] = None,
+        on_status_change: Callable[[str, bool], None] | None = None,
         autostart: bool = False
     ):
         resolved_model = str(model_path or "").strip()
@@ -6730,7 +6732,7 @@ class AIBrainEngine:
         self.status_msg = "Offline (Idle - Click to Load)"
         self._ai_fail_count = 0
         self._ai_cooldown_until = 0.0
-        self._proc: Optional[subprocess.Popen] = None
+        self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
         self.session_id = f"sess_{int(time.time())}"
 
@@ -6875,7 +6877,7 @@ class AIBrainEngine:
     def on_action_logged(self, rec: ActionAuditRecord):
         """Callback wired into AuditLogger to track every user action into brain.db and extract learnings."""
         def _bg():
-            dev_serial = rec.target if rec.target else ""
+            dev_serial = rec.target or ""
             self.brain_db.record_action(
                 category=rec.category,
                 action=rec.action,
@@ -6941,7 +6943,7 @@ class AIBrainEngine:
     def ask(
         self,
         prompt: str,
-        system_prompt: Optional[str] = None,
+        system_prompt: str | None = None,
         max_tokens: int = 768,
         temperature: float = 0.2
     ) -> str:
@@ -7023,8 +7025,8 @@ class AIBrainEngine:
         user_text: str,
         adb_engine: Any,
         store: Any,
-        confirm: Optional[Callable[[str], bool]] = None,
-    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+        confirm: Callable[[str], bool] | None = None,
+    ) -> tuple[str, dict[str, Any] | None]:
         """
         Processes a user request through the Brain Copilot.
         Read-only intents (battery, info) answer directly; mutations (reboot, uninstall,
@@ -7108,7 +7110,7 @@ class AIBrainEngine:
             msg = f"🧹 **Memory Trim Executed**:\n{res}"
             return msg, {"action": "trim_ram", "result": res}
 
-        elif t_lower.startswith("uninstall ") or t_lower.startswith("remove "):
+        elif t_lower.startswith(("uninstall ", "remove ")):
             parts = text.split()
             if len(parts) >= 2:
                 pkg = parts[1].strip()
@@ -7121,7 +7123,7 @@ class AIBrainEngine:
                     store.trigger_global_refresh()
                     return msg, {"action": "uninstall", "package": pkg, "success": ok}
 
-        elif t_lower.startswith("restore ") or t_lower.startswith("re-enable "):
+        elif t_lower.startswith(("restore ", "re-enable ")):
             parts = text.split()
             if len(parts) >= 2:
                 pkg = parts[1].strip()
@@ -7157,8 +7159,10 @@ class AIBrainEngine:
     def _offline_copilot_answer(self, adb_engine: Any, cur_dev: Any) -> str:
         """Deterministic fallback so the brain panel is useful without a loaded model."""
         lines = [
-            "🧠 **Offline Copilot** — Gemma 4B is currently stopped to save 3.7GB RAM.\n"
-            "Click **[▶ Start Model]** at the top right to load Gemma 4B into memory, or use instant device commands:"
+            (
+                "🧠 **Offline Copilot** — Gemma 4B is currently stopped to save 3.7GB RAM.\n"
+                "Click **[▶ Start Model]** at the top right to load Gemma 4B into memory, or use instant device commands:"
+            )
         ]
         if not cur_dev:
             lines.append("• No device connected. Connect via USB or WiFi to run device commands.")
@@ -7206,15 +7210,15 @@ class BatchSummaryModal(ctk.CTkToplevel):
         parent,
         title: str,
         subtitle: str,
-        results: List[Union[str, Tuple[str, bool, str]]],
-        on_close: Optional[Callable[[], None]] = None
+        results: list[str | tuple[str, bool, str]],
+        on_close: Callable[[], None] | None = None
     ):
         super().__init__(parent)
         self.parent_widget = parent
         self.on_close_cb = on_close
 
         # Normalize results into List[Tuple[name, success_bool, detail_str]]
-        self.items: List[Tuple[str, bool, str]] = []
+        self.items: list[tuple[str, bool, str]] = []
         for r in results:
             if isinstance(r, tuple) and len(r) == 3:
                 self.items.append((str(r[0]), bool(r[1]), str(r[2])))
@@ -7343,7 +7347,7 @@ class BatchSummaryModal(ctk.CTkToplevel):
             ).pack(side="left", padx=4)
 
             # Detail message
-            disp_detail = detail if detail else ("Success" if ok else "Failed")
+            disp_detail = detail or ("Success" if ok else "Failed")
             ctk.CTkLabel(
                 row, text=disp_detail, font=ctk.CTkFont(size=10),
                 text_color=("gray30", "gray70"), anchor="w"
@@ -7396,7 +7400,7 @@ class PresetPickerModal(ctk.CTkToplevel):
     def __init__(
         self,
         parent,
-        presets: List[Dict[str, Any]],
+        presets: list[dict[str, Any]],
         on_select: Callable[[str], None],
         on_browse: Callable[[], None]
     ):
@@ -7566,14 +7570,14 @@ class ApplicationsView(ctk.CTkFrame):
         self.debloat_db = store.debloat_db
         self.cfg = store.config
 
-        self.displayed_apps: List[Dict[str, Any]] = []
-        self.app_checkbox_vars: Dict[str, ctk.BooleanVar] = {}
-        self.app_icon_labels: Dict[str, ctk.CTkLabel] = {}
-        self.app_rows: Dict[str, Dict[str, Any]] = {}
-        self.selected_pkgs: Set[str] = set()
+        self.displayed_apps: list[dict[str, Any]] = []
+        self.app_checkbox_vars: dict[str, ctk.BooleanVar] = {}
+        self.app_icon_labels: dict[str, ctk.CTkLabel] = {}
+        self.app_rows: dict[str, dict[str, Any]] = {}
+        self.selected_pkgs: set[str] = set()
         self._filter_job = None
         self._render_gen = 0
-        self._badge_ctk_cache: Dict[Tuple[str, str, int], Any] = {}
+        self._badge_ctk_cache: dict[tuple[str, str, int], Any] = {}
 
         self._build_ui()
 
@@ -7754,7 +7758,7 @@ class ApplicationsView(ctk.CTkFrame):
         self.displayed_apps = filtered
         self._render_app_rows()
 
-    def _get_app_icon(self, pkg: str, name: str) -> Optional[Any]:
+    def _get_app_icon(self, pkg: str, name: str) -> Any | None:
         """Ultra-fast pooled CTkImage lookup. Reuses letter+color badges across packages for zero lag."""
         if not HAS_PIL or not self.cfg.get('show_icons', True):
             return None
@@ -7826,7 +7830,7 @@ class ApplicationsView(ctk.CTkFrame):
         # Render in non-blocking micro-batches of 15 rows so the UI event loop never freezes!
         self._render_app_chunk(self.displayed_apps, 0, current_gen)
 
-    def _render_app_chunk(self, items: List[Dict[str, Any]], idx: int, gen: int):
+    def _render_app_chunk(self, items: list[dict[str, Any]], idx: int, gen: int):
         if gen != self._render_gen or not self.winfo_exists():
             return
         batch_end = min(len(items), idx + 10)
@@ -7861,7 +7865,7 @@ class ApplicationsView(ctk.CTkFrame):
             ctk.CTkButton(acts, text="🗑", width=26, height=24, fg_color="#D32F2F",
                           command=lambda p=pkg: self._single_uninstall(p)).pack(side="left", padx=1)
 
-    def _create_single_app_row(self, app: Dict[str, Any]):
+    def _create_single_app_row(self, app: dict[str, Any]):
         pkg = app['package']
         name = self.debloat_db.get_label(pkg)
         is_sys = app['type'] == 'system'
@@ -7948,17 +7952,7 @@ class ApplicationsView(ctk.CTkFrame):
 
         mode = self.app_filter_var.get()
         matches_filter = True
-        if mode == 'user' and (target_app['type'] != 'user' or new_uninst):
-            matches_filter = False
-        elif mode == 'system' and (target_app['type'] != 'system' or new_uninst):
-            matches_filter = False
-        elif mode == 'enabled' and (not new_enabled or new_uninst):
-            matches_filter = False
-        elif mode == 'disabled' and (new_enabled or new_uninst):
-            matches_filter = False
-        elif mode == 'uninstalled' and not new_uninst:
-            matches_filter = False
-        elif mode == 'selected' and pkg not in self.selected_pkgs:
+        if (mode == 'user' and (target_app['type'] != 'user' or new_uninst)) or (mode == 'system' and (target_app['type'] != 'system' or new_uninst)) or (mode == 'enabled' and (not new_enabled or new_uninst)) or (mode == 'disabled' and (new_enabled or new_uninst)) or (mode == 'uninstalled' and not new_uninst) or (mode == 'selected' and pkg not in self.selected_pkgs):
             matches_filter = False
 
         row_info = self.app_rows.get(pkg)
@@ -8042,7 +8036,7 @@ class ApplicationsView(ctk.CTkFrame):
         threading.Thread(target=_worker, daemon=True).start()
 
     @staticmethod
-    def parse_package_list_file(filepath: str) -> List[str]:
+    def parse_package_list_file(filepath: str) -> list[str]:
         """
         Robustly extracts Android package identifiers from .txt, .adac, .json, or .csv files.
         Strips BOM (\ufeff), inline and line-leading comments (#, //, ;), handles CSV quotes,
@@ -8050,14 +8044,14 @@ class ApplicationsView(ctk.CTkFrame):
         """
         if not os.path.isfile(filepath):
             return []
-        packages: List[str] = []
+        packages: list[str] = []
         try:
             if filepath.lower().endswith('.json'):
-                with open(filepath, 'r', encoding='utf-8-sig', errors='ignore') as fp:
+                with open(filepath, encoding='utf-8-sig', errors='ignore') as fp:
                     data = json.load(fp)
                 raw_items = data.get('packages', data) if isinstance(data, dict) else data
                 if isinstance(raw_items, dict):
-                    for k in raw_items.keys():
+                    for k in raw_items:
                         cand = str(k).strip().lstrip('\ufeff')
                         if cand and ' ' not in cand and '.' in cand:
                             packages.append(cand)
@@ -8072,7 +8066,7 @@ class ApplicationsView(ctk.CTkFrame):
                         if cand and ' ' not in cand and '.' in cand:
                             packages.append(cand)
             else:
-                with open(filepath, 'r', encoding='utf-8-sig', errors='ignore') as fp:
+                with open(filepath, encoding='utf-8-sig', errors='ignore') as fp:
                     content = fp.read()
                 for line in content.splitlines():
                     line = line.strip().lstrip('\ufeff')
@@ -8106,7 +8100,7 @@ class ApplicationsView(ctk.CTkFrame):
     def _save_selection_list(self):
         """Saves current selected packages (or displayed filtered apps) into an importable preset list file."""
         if self.selected_pkgs:
-            pkgs_to_save = sorted(list(self.selected_pkgs))
+            pkgs_to_save = sorted(self.selected_pkgs)
         elif self.displayed_apps:
             filter_mode = self.app_filter_var.get()
             count = len(self.displayed_apps)
@@ -8201,7 +8195,7 @@ class ApplicationsView(ctk.CTkFrame):
             LOGGER.error("Failed to save selection list: %s", e)
             messagebox.showerror("Save Error", f"Failed to save selection preset:\n{e}", parent=safe_dialog_parent(self))
 
-    def _gather_available_presets(self, dev_presets_dir: Optional[str], global_presets_dir: str) -> List[Dict[str, Any]]:
+    def _gather_available_presets(self, dev_presets_dir: str | None, global_presets_dir: str) -> list[dict[str, Any]]:
         """Collects all preset files from device-specific and global preset directories."""
         presets = []
         seen_paths = set()
@@ -8688,8 +8682,8 @@ class DebloatView(ctk.CTkFrame):
         self.engine = store.adb_engine
         self.debloat_db = store.debloat_db
         self.cfg = store.config
-        self.debloat_vars: Dict[str, ctk.BooleanVar] = {}
-        self._raw_matched_apps: Dict[str, str] = {}
+        self.debloat_vars: dict[str, ctk.BooleanVar] = {}
+        self._raw_matched_apps: dict[str, str] = {}
         self._render_gen = 0
 
         self._build_ui()
@@ -8883,7 +8877,7 @@ class DebloatView(ctk.CTkFrame):
         self._update_debloat_counts()
         self._render_debloat_chunk(matched_items, installed_map, 0, gen)
 
-    def _render_debloat_chunk(self, items: List[Tuple[str, str]], installed_map: Dict[str, Any], idx: int, gen: int):
+    def _render_debloat_chunk(self, items: list[tuple[str, str]], installed_map: dict[str, Any], idx: int, gen: int):
         if gen != self._render_gen or not self.winfo_exists():
             return
         end = min(len(items), idx + 12)
@@ -9100,7 +9094,7 @@ class ProcessView(ctk.CTkFrame):
         super().__init__(parent, fg_color="transparent")
         self.store = store
         self.engine = store.adb_engine
-        self._process_cache: List[Dict[str, Any]] = []
+        self._process_cache: list[dict[str, Any]] = []
         self._render_gen = 0
 
         self._build_ui()
@@ -9208,7 +9202,7 @@ class ProcessView(ctk.CTkFrame):
         # Render all filtered processes progressively into scrollable view
         self._render_proc_chunk(filtered, 0, gen)
 
-    def _render_proc_chunk(self, items: List[Dict[str, Any]], idx: int, gen: int):
+    def _render_proc_chunk(self, items: list[dict[str, Any]], idx: int, gen: int):
         if gen != self._render_gen or not self.winfo_exists():
             return
         end = min(len(items), idx + 12)
@@ -9271,8 +9265,8 @@ class PermissionsView(ctk.CTkFrame):
         self.store = store
         self.engine = store.adb_engine
         self.debloat_db = store.debloat_db
-        self.perm_row_vars: Dict[str, ctk.BooleanVar] = {}
-        self._perm_cache: Dict[str, List[str]] = {'granted': [], 'revoked': [], 'not_requested': []}
+        self.perm_row_vars: dict[str, ctk.BooleanVar] = {}
+        self._perm_cache: dict[str, list[str]] = {'granted': [], 'revoked': [], 'not_requested': []}
         self._render_gen = 0
 
         self.perms_dict = {
@@ -9461,7 +9455,7 @@ class PermissionsView(ctk.CTkFrame):
 
         self._render_perm_chunk(items, 0, gen)
 
-    def _render_perm_chunk(self, items: List[Tuple[str, str, bool, bool]], idx: int, gen: int):
+    def _render_perm_chunk(self, items: list[tuple[str, str, bool, bool]], idx: int, gen: int):
         if gen != self._render_gen or not self.winfo_exists():
             return
         end = min(len(items), idx + 12)
@@ -9890,7 +9884,7 @@ class RescueView(ctk.CTkFrame):
         def _w():
             devs = self.engine.scan_fastboot_devices()
             vars_map = self.engine.get_fastboot_vars()
-            lines = [f"Fastboot Devices: {devs if devs else 'None detected'}"]
+            lines = [f"Fastboot Devices: {devs or 'None detected'}"]
             for k, v in vars_map.items():
                 lines.append(f"  {k}: {v}")
             safe_after(0, lambda: self._log("\n".join(lines)))
@@ -10003,9 +9997,9 @@ class ScreenView(ctk.CTkFrame):
         super().__init__(parent, fg_color="transparent")
         self.store = store
         self.engine = store.adb_engine
-        self._native_img_size: Tuple[int, int] = (1080, 2400)
-        self._shown_img_size: Tuple[int, int] = (360, 520)
-        self._drag_start: Optional[Tuple[int, int]] = None
+        self._native_img_size: tuple[int, int] = (1080, 2400)
+        self._shown_img_size: tuple[int, int] = (360, 520)
+        self._drag_start: tuple[int, int] | None = None
 
         self._build_ui()
 
@@ -10543,7 +10537,7 @@ class InstallView(ctk.CTkFrame):
         self.store = store
         self.engine = store.adb_engine
         self.current_remote_dir = "/sdcard"
-        self.remote_entries: List[Dict[str, Any]] = []
+        self.remote_entries: list[dict[str, Any]] = []
         self._render_gen = 0
 
         self._build_ui()
@@ -10706,7 +10700,7 @@ class InstallView(ctk.CTkFrame):
 
         self._render_fe_chunk(self.remote_entries, 0, gen)
 
-    def _render_fe_chunk(self, items: List[Dict[str, Any]], idx: int, gen: int):
+    def _render_fe_chunk(self, items: list[dict[str, Any]], idx: int, gen: int):
         if gen != self._render_gen or not self.winfo_exists():
             return
         end = min(len(items), idx + 15)
@@ -10745,7 +10739,7 @@ class InstallView(ctk.CTkFrame):
         if end < len(items):
             safe_after(4, lambda: self._render_fe_chunk(items, end, gen))
 
-    def _pull_remote_item(self, item: Dict[str, Any]):
+    def _pull_remote_item(self, item: dict[str, Any]):
         cur_dev = self.store.get_current_device() if hasattr(self, 'store') else None
         cur_serial = cur_dev.serial if cur_dev else ""
         dev_dl_dir = self.engine.get_device_dir('downloads', cur_serial) if cur_serial else os.path.join(DATA_DIR, 'downloads')
@@ -10787,7 +10781,7 @@ class InstallView(ctk.CTkFrame):
         threading.Thread(target=_worker, daemon=True).start()
 
 
-    def _rename_remote_item(self, item: Dict[str, Any]):
+    def _rename_remote_item(self, item: dict[str, Any]):
         dialog = ctk.CTkInputDialog(text=f"Rename '{item['name']}' to:", title="Rename Remote Item")
         new_name = dialog.get_input()
         if not new_name or not new_name.strip():
@@ -10805,7 +10799,7 @@ class InstallView(ctk.CTkFrame):
         threading.Thread(target=_worker, daemon=True).start()
 
 
-    def _delete_remote_item(self, item: Dict[str, Any]):
+    def _delete_remote_item(self, item: dict[str, Any]):
         if not messagebox.askyesno("Confirm Delete", f"Permanently delete remote path:\n{item['path']}?", parent=safe_dialog_parent(self)):
             return
         cur = self.store.get_current_device()
@@ -10997,10 +10991,10 @@ class ConsoleView(ctk.CTkFrame):
         super().__init__(parent, fg_color="transparent")
         self.store = store
         self.engine = store.adb_engine
-        self.cmd_history: List[str] = []
+        self.cmd_history: list[str] = []
         self.history_idx: int = -1
         self._streaming_logcat = False
-        self._logcat_buffer: List[str] = []
+        self._logcat_buffer: list[str] = []
         self._logcat_lock = threading.Lock()
 
         self._build_ui()
@@ -11186,7 +11180,7 @@ class ConsoleView(ctk.CTkFrame):
         log_file_p = os.path.join(DATA_DIR, 'logs', 'appcontrol.log')
         if os.path.isfile(log_file_p):
             try:
-                with open(log_file_p, 'r', encoding='utf-8', errors='ignore') as f:
+                with open(log_file_p, encoding='utf-8', errors='ignore') as f:
                     lines = f.readlines()
                 self.console_box.insert("end", "\n=== LIVE APP CONTROL LOGS (Last 100 lines) ===\n")
                 self.console_box.insert("end", "".join(lines[-100:]))
@@ -11647,7 +11641,7 @@ class SettingsView(ctk.CTkFrame):
         ctk.CTkLabel(filter_bar, text="Device:", font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(10, 4), pady=4)
 
         all_backups = self.engine.scan_all_device_backups()
-        unique_devices = sorted(list({b["device_folder"] for b in all_backups if b["device_folder"]}))
+        unique_devices = sorted({b["device_folder"] for b in all_backups if b["device_folder"]})
         cur_dev = self.store.get_current_device() if hasattr(self, 'store') else None
         cur_serial = cur_dev.serial if cur_dev else ""
 
@@ -11789,7 +11783,7 @@ class SettingsView(ctk.CTkFrame):
                 pass
         threading.Thread(target=_w, daemon=True).start()
 
-    def _run_fastboot_cmd(self, args: List[str]):
+    def _run_fastboot_cmd(self, args: list[str]):
         def _w():
             ok, out, err = self.engine.run_fastboot(args)
             try:
@@ -12072,9 +12066,9 @@ class AIBrainView(ctk.CTkFrame):
         super().__init__(parent, fg_color="transparent")
         self.store = store
         self.engine = store.adb_engine
-        self.brain_engine: Optional[AIBrainEngine] = getattr(store, 'brain_engine', None)
+        self.brain_engine: AIBrainEngine | None = getattr(store, 'brain_engine', None)
         self.brain_db: BrainDatabase = getattr(self.brain_engine, 'brain_db', None) or BrainDatabase()
-        self.chat_bubbles: List[ctk.CTkFrame] = []
+        self.chat_bubbles: list[ctk.CTkFrame] = []
         self._is_generating = False
 
         self._build_ui()
@@ -12357,7 +12351,7 @@ class AIBrainView(ctk.CTkFrame):
             for m in msgs:
                 self._append_message_card(m["role"], m["content"])
 
-    def _append_message_card(self, role: str, content: str, action_data: Optional[Dict[str, Any]] = None):
+    def _append_message_card(self, role: str, content: str, action_data: dict[str, Any] | None = None):
         is_user = (role == "user")
         row = ctk.CTkFrame(self.chat_scroll, fg_color="transparent")
         row.pack(fill="x", pady=4, padx=6)
@@ -12554,7 +12548,7 @@ class LiveActivityPanel(ctk.CTkFrame):
         self.is_collapsed = False
         self.auto_scroll = True
         self.filter_mode = "all"
-        self._raw_lines: List[Tuple[str, str, str]] = []  # (text, tag, category)
+        self._raw_lines: list[tuple[str, str, str]] = []  # (text, tag, category)
         self._lock = threading.Lock()
         self._log_queue: queue.Queue = queue.Queue()
         self._poll_job = None
@@ -12839,11 +12833,7 @@ class LiveActivityPanel(ctk.CTkFrame):
 
         current_filter = self.filter_mode.lower()
         if current_filter != "all":
-            if current_filter == "commands" and filter_cat != "commands":
-                return
-            elif current_filter == "logs" and filter_cat != "logs":
-                return
-            elif current_filter == "errors" and filter_cat != "errors":
+            if (current_filter == "commands" and filter_cat != "commands") or (current_filter == "logs" and filter_cat != "logs") or (current_filter == "errors" and filter_cat != "errors"):
                 return
 
         tb = self.console_textbox._textbox
@@ -12939,7 +12929,7 @@ class LiveActivityPanel(ctk.CTkFrame):
             else:
                 serial_override = serial
 
-            sub = raw[6:] if raw.startswith("shell ") else raw
+            sub = raw.removeprefix("shell ")
             ok, stdout, stderr = engine.run_adb(
                 ["shell", sub], timeout=30, target_serial=serial_override
             )
@@ -12967,8 +12957,8 @@ class LiveActivityPanel(ctk.CTkFrame):
         if self.task_lbl.cget("text") != text:
             self.task_lbl.configure(text=text)
 
-    def set_task(self, label: str, fraction: Optional[float] = None,
-                 busy: Optional[bool] = None):
+    def set_task(self, label: str, fraction: float | None = None,
+                 busy: bool | None = None):
         """Task card driven by the main window; idempotent so it cannot blink."""
         if not self.winfo_exists():
             return
@@ -13336,7 +13326,7 @@ class ADBAppControlMain(ctk.CTk):
         self.device_pill = ctk.CTkLabel(self.footer, text="● No Device Connected", anchor="e", font=ctk.CTkFont(size=12), text_color="#D32F2F")
         self.device_pill.pack(side="right", padx=16)
 
-    def _render_progress(self, label: str, fraction: Optional[float], busy: Optional[bool] = None):
+    def _render_progress(self, label: str, fraction: float | None, busy: bool | None = None):
         """Tk-thread only: the single writer for the footer bar and the right-panel card."""
         if not self.winfo_exists():
             return
@@ -13360,8 +13350,8 @@ class ADBAppControlMain(ctk.CTk):
             except Exception:
                 pass
 
-    def report_progress(self, label: str, fraction: Optional[float] = None,
-                        busy: Optional[bool] = None):
+    def report_progress(self, label: str, fraction: float | None = None,
+                        busy: bool | None = None):
         """Thread-safe report: ``fraction`` None pulses, 0.0-1.0 is determinate."""
         safe_after(0, lambda: self._render_progress(label, fraction, busy))
 
@@ -13421,7 +13411,7 @@ class ADBAppControlMain(ctk.CTk):
             ])
         ]
 
-        self.nav_buttons: Dict[str, ctk.CTkButton] = {}
+        self.nav_buttons: dict[str, ctk.CTkButton] = {}
         for section_title, items in nav_sections:
             ctk.CTkLabel(
                 self.sidebar,
@@ -13466,7 +13456,7 @@ class ADBAppControlMain(ctk.CTk):
         self.sidebar_dev_sub.pack(fill="x", padx=8, pady=(0, 4))
 
     def _build_views(self):
-        self.views: Dict[str, ctk.CTkFrame] = {
+        self.views: dict[str, ctk.CTkFrame] = {
             "apps": ApplicationsView(self.content_area, self.store),
             "brain": AIBrainView(self.content_area, self.store),
             "debloat": DebloatView(self.content_area, self.store),
@@ -13638,7 +13628,7 @@ class ADBAppControlMain(ctk.CTk):
 
         self._update_silent_button()
 
-    def _start_background_icon_sync(self, apps: List[Dict[str, Any]]):
+    def _start_background_icon_sync(self, apps: list[dict[str, Any]]):
         def _worker():
             sz = int(self.store.config.get('icon_size', 24))
             results = self.store.adb_engine.icon_manager.generate_all_icons(
@@ -13815,7 +13805,8 @@ class ADBAppControlMain(ctk.CTk):
                 def _fin():
                     status_lbl.configure(text=res, text_color="#388E3C" if ok else "#D32F2F")
                     if ok:
-                        ip_entry.delete(0, 'end'); ip_entry.insert(0, pip)
+                        ip_entry.delete(0, 'end')
+                        ip_entry.insert(0, pip)
                         messagebox.showinfo("Paired", f"{res}\n\nNow switch to the 'Connect' tab and enter the main Wireless Debugging port.", parent=win)
                 safe_after(0, _fin)
             threading.Thread(target=_w, daemon=True).start()
@@ -14373,7 +14364,7 @@ def run_device_verification(write_artifacts: bool = False) -> int:
     print("=" * 65)
     print("ADB APPCONTROL: DEVICE & LAYOUT VERIFICATION")
     print("=" * 65)
-    results: List[bool] = []
+    results: list[bool] = []
 
     def check(name: str, ok: bool, detail: str = "") -> bool:
         results.append(bool(ok))
