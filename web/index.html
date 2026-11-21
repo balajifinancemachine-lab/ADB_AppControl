@@ -2099,8 +2099,8 @@ footer {
         formData.append('files', file);
       }
       formData.append('grant_perms', document.getElementById('inst-grant')?.checked ? 'true' : 'false');
-      formData.append('downgrade', document.getElementById('inst-down')?.checked ? 'true' : 'false');
-      formData.append('replace', document.getElementById('inst-reinst')?.checked ? 'true' : 'false');
+      formData.append('downgrade', document.getElementById('inst-downgrade')?.checked ? 'true' : 'false');
+      formData.append('replace', document.getElementById('inst-replace')?.checked ? 'true' : 'false');
       formData.append('test_pkg', document.getElementById('inst-test')?.checked ? 'true' : 'false');
 
       try {
