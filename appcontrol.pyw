@@ -4435,11 +4435,15 @@ class ADBEngine:
         s = self._resolve_serial(serial)
         if not PACKAGE_NAME_RE.match(str(pkg or "")):
             return "absent"
+        pk = _pkg_arg(pkg)
         probe = (
-            f"pm list packages -e | grep -qx 'package:{pkg}' && echo ADB_APPCONTROL_ENABLED; "
-            f"pm list packages -d | grep -qx 'package:{pkg}' && echo ADB_APPCONTROL_DISABLED"
+            f"(cmd package list packages -e {pk} 2>/dev/null || pm list packages -e {pk}) | grep -qx 'package:{pkg}' && echo ADB_APPCONTROL_ENABLED; "
+            f"(cmd package list packages -d {pk} 2>/dev/null || pm list packages -d {pk}) | grep -qx 'package:{pkg}' && echo ADB_APPCONTROL_DISABLED"
         )
-        _ok, out, _err = self.run_shell(probe, timeout=12, target_serial=s)
+        try:
+            _ok, out, _err = self.run_shell(probe, timeout=8, target_serial=s, audit=False)
+        except TypeError:
+            _ok, out, _err = self.run_shell(probe, timeout=8, target_serial=s)
         text = out or ""
         if "ADB_APPCONTROL_DISABLED" in text:
             return "disabled"
@@ -4600,8 +4604,13 @@ class ADBEngine:
         return ActionResult(accepted, res)
     def _is_system_package(self, pkg: str, serial: str = "") -> bool:
         """True when the package ships on a read-only partition (restorable in place)."""
-        ok, out, _ = self.run_shell(f"pm list packages -s {_pkg_arg(pkg)}", timeout=8, target_serial=serial)
-        return bool(ok and f"={pkg}" in (out or ""))
+        try:
+            ok, out, _ = self.run_shell(f"pm list packages -s {_pkg_arg(pkg)}", timeout=8, target_serial=serial, audit=False)
+        except TypeError:
+            ok, out, _ = self.run_shell(f"pm list packages -s {_pkg_arg(pkg)}", timeout=8, target_serial=serial)
+        target = f"package:{pkg}"
+        lines = [l.strip() for l in (out or "").splitlines()]
+        return bool(ok and (target in lines or f"={pkg}" in (out or "")))
 
     def _pre_uninstall_backup(self, pkg: str, serial: str = "") -> str:
         """Pulls a user app's APKs before it is removed; returns the backup folder ('' on failure)."""
@@ -4855,7 +4864,7 @@ class ADBEngine:
         ok, out, err = self.run_shell(cmd, timeout=18, target_serial=s)
         res = (out or err).strip()
         state = self._pkg_state(pkg, s)
-        accepted = bool(state == "enabled")
+        accepted = bool("installed for user" in res.lower() or state in ("enabled", "disabled"))
         if accepted:
             self._journal_mark_restored(pkg)
         if not res:
@@ -7485,6 +7494,7 @@ class ApplicationsView(ctk.CTkFrame):
         self.displayed_apps: List[Dict[str, Any]] = []
         self.app_checkbox_vars: Dict[str, ctk.BooleanVar] = {}
         self.app_icon_labels: Dict[str, ctk.CTkLabel] = {}
+        self.app_rows: Dict[str, Dict[str, Any]] = {}
         self.selected_pkgs: Set[str] = set()
         self._filter_job = None
         self._render_gen = 0
@@ -7716,6 +7726,7 @@ class ApplicationsView(ctk.CTkFrame):
         for w in self.app_list_canvas.winfo_children():
             w.destroy()
         self.app_icon_labels.clear()
+        self.app_rows.clear()
 
         all_apps = self.store.get_all_apps()
         total = len(all_apps)
@@ -7748,6 +7759,32 @@ class ApplicationsView(ctk.CTkFrame):
             self._create_single_app_row(app)
         if batch_end < len(items):
             safe_after(4, lambda: self._render_app_chunk(items, batch_end, gen))
+
+    def _populate_row_actions(self, acts: ctk.CTkFrame, pkg: str, name: str, is_uninst: bool, enabled: bool):
+        for w in acts.winfo_children():
+            w.destroy()
+        if is_uninst:
+            ctk.CTkButton(acts, text="🔄 Restore", width=80, height=24, fg_color="#2E7D32", hover_color="#1B5E20",
+                          command=lambda p=pkg: self._restore_system_app(p)).pack(side="left", padx=1)
+            ctk.CTkButton(acts, text="ℹ", width=28, height=24, fg_color=("gray80", "gray25"),
+                          command=lambda p=pkg: self.engine.show_app_details(p)).pack(side="left", padx=1)
+        else:
+            ctk.CTkButton(acts, text="ℹ", width=26, height=24, fg_color=("gray80", "gray25"),
+                          command=lambda p=pkg: self.engine.show_app_details(p)).pack(side="left", padx=1)
+            ctk.CTkButton(acts, text="✏", width=26, height=24, fg_color=("gray75", "gray28"),
+                          command=lambda p=pkg, n=name: self._rename_app_label_dialog(p, n)).pack(side="left", padx=1)
+            ctk.CTkButton(acts, text="▶", width=26, height=24, fg_color=("#1976D2", "#1565C0"),
+                          command=lambda p=pkg: self._launch_app(p)).pack(side="left", padx=1)
+            ctk.CTkButton(acts, text="💾", width=26, height=24, fg_color=("#7B1FA2", "#6A1B9A"),
+                          command=lambda p=pkg: self._single_backup_apk(p)).pack(side="left", padx=1)
+            if enabled:
+                ctk.CTkButton(acts, text="⛔", width=26, height=24, fg_color="#F57C00",
+                              command=lambda p=pkg: self._single_action(self.engine.disable_app, p, "Disable")).pack(side="left", padx=1)
+            else:
+                ctk.CTkButton(acts, text="✅", width=26, height=24, fg_color="#388E3C",
+                              command=lambda p=pkg: self._single_action(self.engine.enable_app, p, "Enable")).pack(side="left", padx=1)
+            ctk.CTkButton(acts, text="🗑", width=26, height=24, fg_color="#D32F2F",
+                          command=lambda p=pkg: self._single_uninstall(p)).pack(side="left", padx=1)
 
     def _create_single_app_row(self, app: Dict[str, Any]):
         pkg = app['package']
@@ -7802,39 +7839,75 @@ class ApplicationsView(ctk.CTkFrame):
         else:
             stat_fg, stat_txt = ("#C62828", "#B71C1C"), "DISABLED"
 
-        ctk.CTkLabel(
+        stat_lbl = ctk.CTkLabel(
             row, text=stat_txt, width=82, height=20, corner_radius=4,
             fg_color=stat_fg, font=ctk.CTkFont(size=9, weight="bold"), text_color="white"
-        ).pack(side="left", padx=4)
+        )
+        stat_lbl.pack(side="left", padx=4)
 
         acts = ctk.CTkFrame(row, fg_color="transparent")
         acts.pack(side="right", padx=6)
+        self._populate_row_actions(acts, pkg, name, is_uninst, enabled)
 
-        if is_uninst:
-            ctk.CTkButton(acts, text="🔄 Restore", width=80, height=24, fg_color="#2E7D32", hover_color="#1B5E20",
-                          command=lambda p=pkg: self._restore_system_app(p)).pack(side="left", padx=1)
-            ctk.CTkButton(acts, text="ℹ", width=28, height=24, fg_color=("gray80", "gray25"),
-                          command=lambda p=pkg: self.engine.show_app_details(p)).pack(side="left", padx=1)
-        else:
-            ctk.CTkButton(acts, text="ℹ", width=26, height=24, fg_color=("gray80", "gray25"),
-                          command=lambda p=pkg: self.engine.show_app_details(p)).pack(side="left", padx=1)
-            ctk.CTkButton(acts, text="✏", width=26, height=24, fg_color=("gray75", "gray28"),
-                          command=lambda p=pkg, n=name: self._rename_app_label_dialog(p, n)).pack(side="left", padx=1)
-            ctk.CTkButton(acts, text="▶", width=26, height=24, fg_color=("#1976D2", "#1565C0"),
-                          command=lambda p=pkg: self._launch_app(p)).pack(side="left", padx=1)
-            ctk.CTkButton(acts, text="💾", width=26, height=24, fg_color=("#7B1FA2", "#6A1B9A"),
-                          command=lambda p=pkg: self._single_backup_apk(p)).pack(side="left", padx=1)
-            if enabled:
-                ctk.CTkButton(acts, text="⛔", width=26, height=24, fg_color="#F57C00",
-                              command=lambda p=pkg: self._single_action(self.engine.disable_app, p, "Disable")).pack(side="left", padx=1)
-            else:
-                ctk.CTkButton(acts, text="✅", width=26, height=24, fg_color="#388E3C",
-                              command=lambda p=pkg: self._single_action(self.engine.enable_app, p, "Enable")).pack(side="left", padx=1)
-            ctk.CTkButton(acts, text="🗑", width=26, height=24, fg_color="#D32F2F",
-                          command=lambda p=pkg: self._single_uninstall(p)).pack(side="left", padx=1)
+        self.app_rows[pkg] = {
+            'row': row,
+            'app': app,
+            'stat_lbl': stat_lbl,
+            'acts': acts,
+        }
 
         for widget in (row, name_lbl, pkg_lbl):
             widget.bind("<Double-Button-1>", lambda e, p=pkg: self.engine.show_app_details(p))
+
+    def _update_app_status_locally(self, pkg: str, new_enabled: bool, new_uninst: bool):
+        """Zero-latency surgical row update: updates in-memory state and modifies only the single affected row."""
+        target_app = None
+        for a in self.store.get_all_apps():
+            if a.get('package') == pkg:
+                a['enabled'] = new_enabled
+                a['uninstalled'] = new_uninst
+                target_app = a
+                break
+        if not target_app:
+            return
+
+        mode = self.app_filter_var.get()
+        matches_filter = True
+        if mode == 'user' and (target_app['type'] != 'user' or new_uninst):
+            matches_filter = False
+        elif mode == 'system' and (target_app['type'] != 'system' or new_uninst):
+            matches_filter = False
+        elif mode == 'enabled' and (not new_enabled or new_uninst):
+            matches_filter = False
+        elif mode == 'disabled' and (new_enabled or new_uninst):
+            matches_filter = False
+        elif mode == 'uninstalled' and not new_uninst:
+            matches_filter = False
+        elif mode == 'selected' and pkg not in self.selected_pkgs:
+            matches_filter = False
+
+        row_info = self.app_rows.get(pkg)
+        if row_info and row_info['row'].winfo_exists():
+            if matches_filter:
+                if new_uninst:
+                    stat_fg, stat_txt = ("#5D4037", "#3E2723"), "UNINSTALLED"
+                elif new_enabled:
+                    stat_fg, stat_txt = ("#2E7D32", "#1B5E20"), "ENABLED"
+                else:
+                    stat_fg, stat_txt = ("#C62828", "#B71C1C"), "DISABLED"
+                row_info['stat_lbl'].configure(text=stat_txt, fg_color=stat_fg)
+                name = self.debloat_db.get_label(pkg)
+                self._populate_row_actions(row_info['acts'], pkg, name, new_uninst, new_enabled)
+            else:
+                row_info['row'].destroy()
+                self.app_rows.pop(pkg, None)
+                self.displayed_apps = [a for a in self.displayed_apps if a.get('package') != pkg]
+                self._update_app_counts()
+        else:
+            if matches_filter:
+                self.apply_app_filter()
+            else:
+                self._update_app_counts()
 
     def _rename_app_label_dialog(self, pkg: str, current_name: str):
         dialog = ctk.CTkInputDialog(
@@ -8125,11 +8198,11 @@ class ApplicationsView(ctk.CTkFrame):
             title="Load App Selection Preset List",
             initialdir=init_dir,
             filetypes=[
+                ("All Supported Lists (*.txt, *.adac, *.json, *.csv)", "*.txt *.adac *.json *.csv"),
                 ("Text Package List (*.txt)", "*.txt"),
                 ("ADAC Preset File (*.adac)", "*.adac"),
                 ("JSON Package List (*.json)", "*.json"),
                 ("CSV File (*.csv)", "*.csv"),
-                ("All Supported Lists (*.txt;*.adac;*.json;*.csv)", "*.txt;*.adac;*.json;*.csv"),
                 ("All Files (*.*)", "*.*")
             ],
             parent=safe_dialog_parent(self)
@@ -8262,13 +8335,13 @@ class ApplicationsView(ctk.CTkFrame):
             ok = bool(getattr(res, "ok", False))
             def _done():
                 if ok:
-                    for a in self.store.get_all_apps():
-                        if a['package'] == pkg:
-                            a['uninstalled'] = False
-                            a['enabled'] = True
-                self.apply_app_filter()
-                self.store.trigger_global_refresh()
-                messagebox.showinfo("Restore System App", f"Result for {pkg}:\n{res}", parent=safe_dialog_parent(self))
+                    self._update_app_status_locally(pkg, new_enabled=True, new_uninst=False)
+                    LOGGER.info("Restored system app: %s", pkg)
+                if not self.cfg.get('silent_mode', False) or not ok:
+                    if ok:
+                        messagebox.showinfo("Restore System App", f"Successfully restored {pkg}.", parent=safe_dialog_parent(self))
+                    else:
+                        messagebox.showwarning("Restore System App", f"Failed to restore {pkg}:\n{res}", parent=safe_dialog_parent(self))
             safe_after(0, _done)
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -8282,19 +8355,17 @@ class ApplicationsView(ctk.CTkFrame):
             ok = bool(getattr(r, "ok", False))
 
             def _done():
-                # Only reflect the change when the device actually accepted it.
                 if ok:
-                    for a in self.store.get_all_apps():
-                        if a['package'] == pkg:
-                            if name == "Disable":
-                                a['enabled'] = False
-                            elif name in ("Enable", "Restore"):
-                                a['enabled'] = True
-                                a['uninstalled'] = False
-                self.apply_app_filter()
-                self.store.trigger_global_refresh()
-                if not self.cfg.get('silent_mode', False):
-                    messagebox.showinfo(name, f"Result for {pkg}:\n{r}", parent=safe_dialog_parent(self))
+                    if name == "Disable":
+                        self._update_app_status_locally(pkg, new_enabled=False, new_uninst=False)
+                    elif name in ("Enable", "Restore"):
+                        self._update_app_status_locally(pkg, new_enabled=True, new_uninst=False)
+                    LOGGER.info("%s app %s: %s", name, pkg, r)
+                if not self.cfg.get('silent_mode', False) or not ok:
+                    if ok:
+                        messagebox.showinfo(name, f"Result for {pkg}:\n{r}", parent=safe_dialog_parent(self))
+                    else:
+                        messagebox.showwarning(name, f"Failed to {name.lower()} {pkg}:\n{r}", parent=safe_dialog_parent(self))
             safe_after(0, _done)
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -8308,14 +8379,13 @@ class ApplicationsView(ctk.CTkFrame):
             ok = bool(getattr(r, "ok", False))
             def _done():
                 if ok:
-                    for a in self.store.get_all_apps():
-                        if a['package'] == pkg:
-                            a['uninstalled'] = True
-                            a['enabled'] = False
-                self.apply_app_filter()
-                self.store.trigger_global_refresh()
-                if not self.cfg.get('silent_mode', False):
-                    messagebox.showinfo("Uninstall", f"Result for {pkg}:\n{r}", parent=safe_dialog_parent(self))
+                    self._update_app_status_locally(pkg, new_enabled=False, new_uninst=True)
+                    LOGGER.info("Uninstalled app %s: %s", pkg, r)
+                if not self.cfg.get('silent_mode', False) or not ok:
+                    if ok:
+                        messagebox.showinfo("Uninstall", f"Result for {pkg}:\n{r}", parent=safe_dialog_parent(self))
+                    else:
+                        messagebox.showwarning("Uninstall", f"Failed to uninstall {pkg}:\n{r}", parent=safe_dialog_parent(self))
             safe_after(0, _done)
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -8373,10 +8443,7 @@ class ApplicationsView(ctk.CTkFrame):
                 # 3. Re-filter & render table immediately
                 self.apply_app_filter()
 
-                # 4. Trigger global background hardware sync
-                self.store.trigger_global_refresh()
-
-                # 5. Show modern non-blocking summary modal
+                # 4. Show modern non-blocking summary modal
                 BatchSummaryModal(
                     self,
                     title=f"{action_name} Summary",
@@ -8448,10 +8515,7 @@ class ApplicationsView(ctk.CTkFrame):
                     # 3. Re-filter & render table immediately
                     self.apply_app_filter()
 
-                    # 4. Trigger global background hardware sync
-                    self.store.trigger_global_refresh()
-
-                    # 5. Show modern summary modal
+                    # 4. Show modern summary modal
                     BatchSummaryModal(
                         self,
                         title="Uninstall Summary",
@@ -8879,10 +8943,10 @@ class DebloatView(ctk.CTkFrame):
             title="Select Preset File",
             initialdir=init_dir,
             filetypes=[
+                ("All Supported (*.adac, *.json, *.txt)", "*.adac *.json *.txt"),
                 ("ADAC Preset File (*.adac)", "*.adac"),
                 ("JSON Preset (*.json)", "*.json"),
                 ("Text Package List (*.txt)", "*.txt"),
-                ("All Supported (*.adac;*.json;*.txt)", "*.adac;*.json;*.txt"),
                 ("All Files (*.*)", "*.*")
             ],
             parent=safe_dialog_parent(self)
@@ -9770,7 +9834,7 @@ class RescueView(ctk.CTkFrame):
         img = filedialog.askopenfilename(
             title=f"Select Image (.img / .bin) for '{part}' partition",
             filetypes=[
-                ("Partition Image (*.img;*.bin)", "*.img;*.bin"),
+                ("Partition Image (*.img, *.bin)", "*.img *.bin"),
                 ("IMG Image (*.img)", "*.img"),
                 ("BIN Image (*.bin)", "*.bin"),
                 ("All Files (*.*)", "*.*")
@@ -10702,9 +10766,9 @@ class InstallView(ctk.CTkFrame):
         f = filedialog.askopenfilename(
             title="Select Local APK / XAPK / APKS to Inspect",
             filetypes=[
+                ("All Android Packages (*.apk, *.xapk, *.apks, *.apkm)", "*.apk *.xapk *.apks *.apkm"),
                 ("Android Package (*.apk)", "*.apk"),
-                ("Split/Bundle (*.xapk;*.apks;*.apkm)", "*.xapk;*.apks;*.apkm"),
-                ("All Android Packages (*.apk;*.xapk;*.apks;*.apkm)", "*.apk;*.xapk;*.apks;*.apkm"),
+                ("Split/Bundle (*.xapk, *.apks, *.apkm)", "*.xapk *.apks *.apkm"),
                 ("All Files (*.*)", "*.*")
             ],
             parent=safe_dialog_parent(self)
@@ -10780,9 +10844,9 @@ class InstallView(ctk.CTkFrame):
         files = filedialog.askopenfilenames(
             title="Select APK / Split Bundle File(s)",
             filetypes=[
+                ("All Android Packages (*.apk, *.xapk, *.apks, *.apkm)", "*.apk *.xapk *.apks *.apkm"),
                 ("Android Package (*.apk)", "*.apk"),
-                ("Split/Bundle (*.xapk;*.apks;*.apkm)", "*.xapk;*.apks;*.apkm"),
-                ("All Android Packages (*.apk;*.xapk;*.apks;*.apkm)", "*.apk;*.xapk;*.apks;*.apkm"),
+                ("Split/Bundle (*.xapk, *.apks, *.apkm)", "*.xapk *.apks *.apkm"),
                 ("All Files (*.*)", "*.*")
             ],
             parent=safe_dialog_parent(self)
@@ -11657,7 +11721,7 @@ class SettingsView(ctk.CTkFrame):
         img = filedialog.askopenfilename(
             title=f"Select {partition.upper()} Image File (.img)",
             filetypes=[
-                ("Disk Image (*.img;*.bin)", "*.img;*.bin"),
+                ("Disk Image (*.img, *.bin)", "*.img *.bin"),
                 ("IMG Image (*.img)", "*.img"),
                 ("BIN Image (*.bin)", "*.bin"),
                 ("All Files (*.*)", "*.*")

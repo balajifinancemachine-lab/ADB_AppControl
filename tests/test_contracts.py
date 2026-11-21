@@ -84,7 +84,7 @@ def stub_engine(app, tmp_path):
             self.shell_calls = []
             self.journal = app.MutationJournal(str(tmp_path / "journal.json"))
 
-        def run_shell(self, command, timeout=25, target_serial=""):
+        def run_shell(self, command, timeout=25, target_serial="", *args, **kwargs):
             self.shell_calls.append((command, target_serial))
             if "ADB_APPCONTROL_ENABLED" in command:
                 # Device-truth probe used by the mutating actions.
@@ -128,7 +128,7 @@ def _stub_engine(app, handler):
             self.current_device = None
             self.calls = []
 
-        def run_shell(self, command, timeout=25, target_serial=""):
+        def run_shell(self, command, timeout=25, target_serial="", *args, **kwargs):
             self.calls.append(command)
             return handler(command)
 
@@ -314,7 +314,7 @@ def _state_shell(app, action_reply, states):
     """
     queue = list(states)
 
-    def shell(command, timeout=25, target_serial=""):
+    def shell(command, timeout=25, target_serial="", *args, **kwargs):
         if "ADB_APPCONTROL_ENABLED" in command:
             state = queue.pop(0) if queue else "absent"
             marks = {"enabled": "ADB_APPCONTROL_ENABLED", "disabled": "ADB_APPCONTROL_DISABLED"}
@@ -356,7 +356,7 @@ def test_mixed_fallback_output_is_not_parsed_for_success(app):
 
 
 def test_permission_flag_uses_the_device_dump(app):
-    def shell(command, timeout=25, target_serial=""):
+    def shell(command, timeout=25, target_serial="", *args, **kwargs):
         if "grep -F" in command:
             return True, "android.permission.CAMERA: granted=true, flags=[]" + chr(10), ""
         if "dumpsys package" in command:
@@ -371,7 +371,7 @@ def test_permission_flag_uses_the_device_dump(app):
 def _uninstall_commands(app, keep_data):
     calls = []
 
-    def shell(command, timeout=25, target_serial=""):
+    def shell(command, timeout=25, target_serial="", *args, **kwargs):
         calls.append(command)
         if "ADB_APPCONTROL_ENABLED" in command:
             return True, "ADB_APPCONTROL_ENABLED" + chr(10), ""
