@@ -131,4 +131,35 @@ def test_web_server_endpoints(tmp_path, monkeypatch):
     assert res.status_code == 200
     assert "processes" in res.json()
 
+    # 11. Permissions, Specs, D-Pad, Screen Swipe & Rescue APIs
+    res = client.get("/api/permissions/list")
+    assert res.status_code == 200
+    assert "permissions" in res.json()
+
+    res = client.get("/api/devices/specs")
+    assert res.status_code == 200
+    assert "specs" in res.json()
+
+    res = client.post("/api/screen/dpad", json={"direction": "up"})
+    assert res.status_code == 200
+    assert res.json()["key"] == 19
+
+    res = client.post("/api/screen/swipe", json={"x1": 100, "y1": 500, "x2": 100, "y2": 100, "duration": 200})
+    assert res.status_code == 200
+
+    res = client.post("/api/rescue/bootloop_fix", json={"fix_type": "safemode"})
+    assert res.status_code == 200
+    assert res.json()["success"] is True
+
+    res = client.post("/api/rescue/root_action", json={"action": "diagnostic"})
+    assert res.status_code == 200
+    assert "Root Status" in res.json()["message"]
+
+    res = client.post("/api/rescue/fastboot", json={"action": "getvar"})
+    assert res.status_code == 200
+
+    res = client.get("/api/backups")
+    assert res.status_code == 200
+    assert "backups" in res.json()
+
     store.shutdown()

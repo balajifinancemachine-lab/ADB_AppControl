@@ -784,6 +784,8 @@ def create_app(store_provider=None) -> FastAPI:
         msg = store.adb_engine.start_screen_record(sec, dest, serial=serial) if hasattr(store.adb_engine, "start_screen_record") else ""
         return {"success": True, "message": msg, "saved_path": dest}
 
+    # ── REMOTE FILE EXPLORER APIS ──
+
     # ── FILE EXPLORER & INSTALL APIS ──────────────────────────────────────────
     @app.get("/api/files/list")
     def list_files(path: str = "/sdcard/"):
@@ -890,7 +892,13 @@ def create_app(store_provider=None) -> FastAPI:
         cur = store.get_current_device()
         serial = cur.serial if cur else ""
         if action == "getvar":
-            vars_dict = store.adb_engine.get_fastboot_vars(serial=serial) if hasattr(store.adb_engine, "get_fastboot_vars") else {}
+            if hasattr(store.adb_engine, "get_fastboot_vars"):
+                try:
+                    vars_dict = store.adb_engine.get_fastboot_vars(serial=serial)
+                except TypeError:
+                    vars_dict = store.adb_engine.get_fastboot_vars()
+            else:
+                vars_dict = {}
             return {"success": True, "vars": vars_dict}
         elif action == "switch_slot":
             slot = payload.get("slot", "a")

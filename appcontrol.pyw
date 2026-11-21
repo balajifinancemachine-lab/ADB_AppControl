@@ -3893,7 +3893,7 @@ class ADBEngine:
             return "Opened File Manager."
 
     # ── BOOTLOOP, UNBRICK, FASTBOOT & SIDELOAD RECOVERY SUITE ─────────────────
-    def get_fastboot_vars(self) -> dict[str, str]:
+    def get_fastboot_vars(self, serial: str = "") -> dict[str, str]:
         """Reads comprehensive bootloader variables from a device in Fastboot / Fastbootd mode."""
         info = {
             "product": "N/A",
