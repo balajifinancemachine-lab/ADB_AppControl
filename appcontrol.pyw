@@ -10573,6 +10573,49 @@ class InstallView(ctk.CTkFrame):
         opt_card.pack_propagate(False)
 
         flags_box = ctk.CTkFrame(opt_card, fg_color="transparent")
+        flags_box.pack(fill="x", padx=14, pady=(10, 4))
+
+        self.flag_replace = ctk.BooleanVar(value=True)
+        self.flag_grant = ctk.BooleanVar(value=True)
+        self.flag_downgrade = ctk.BooleanVar(value=False)
+        self.flag_test = ctk.BooleanVar(value=False)
+        self.flag_split_group = ctk.BooleanVar(value=False)
+
+        ctk.CTkCheckBox(flags_box, text="Replace Existing (-r)", variable=self.flag_replace).pack(side="left", padx=6)
+        ctk.CTkCheckBox(flags_box, text="Auto Grant Perms (-g)", variable=self.flag_grant).pack(side="left", padx=6)
+        ctk.CTkCheckBox(flags_box, text="Allow Downgrade (-d)", variable=self.flag_downgrade).pack(side="left", padx=6)
+        ctk.CTkCheckBox(flags_box, text="Test Packages (-t)", variable=self.flag_test).pack(side="left", padx=6)
+        ctk.CTkCheckBox(flags_box, text="Install Multiple as Split Group", variable=self.flag_split_group).pack(side="left", padx=6)
+
+        act_row = ctk.CTkFrame(opt_card, fg_color="transparent")
+        act_row.pack(fill="x", padx=14, pady=(6, 8))
+        ctk.CTkButton(act_row, text="➕ Install APKs / XAPK / APKS", width=185, height=32, command=self._select_and_install_apks).pack(side="left", padx=(0, 3))
+        ctk.CTkButton(act_row, text="🔍 Inspect Local APK", width=140, height=32, fg_color=("#5E35B1", "#4527A0"), command=self._inspect_apk_dialog).pack(side="left", padx=3)
+        ctk.CTkButton(act_row, text="📤 Push File", width=105, height=32, fg_color=("#37474F", "#263238"), command=self._push_file_dialog).pack(side="left", padx=3)
+        ctk.CTkButton(act_row, text="📥 Pull Path", width=105, height=32, fg_color=("#00695C", "#004D40"), command=self._pull_file_dialog).pack(side="left", padx=3)
+        ctk.CTkButton(act_row, text="🔌 Enable MTP & Open Explorer", width=190, height=32, fg_color="#00897B",
+                      command=self._enable_and_open_mtp).pack(side="left", padx=3)
+        ctk.CTkButton(act_row, text="📁 Downloads", width=110, height=32, fg_color=("gray75", "gray25"),
+                      command=self._open_downloads_folder).pack(side="left", padx=3)
+
+        split_pane = ctk.CTkFrame(self, fg_color="transparent")
+        split_pane.pack(fill="both", expand=True)
+
+        fe_card = ctk.CTkFrame(split_pane, fg_color=("gray90", "gray14"), corner_radius=8)
+        fe_card.pack(side="left", fill="both", expand=True, padx=(0, 6))
+
+        fe_bar = ctk.CTkFrame(fe_card, height=44, fg_color="transparent")
+        fe_bar.pack(fill="x", padx=10, pady=(8, 4))
+        fe_bar.pack_propagate(False)
+
+        ctk.CTkButton(fe_bar, text="📁 .. Up", width=65, height=28, fg_color=("gray75", "gray25"), command=self._nav_up).pack(side="left", padx=(0, 4))
+        self.fe_path_entry = ctk.CTkEntry(fe_bar, font=ctk.CTkFont(family="Consolas", size=11), height=28)
+        self.fe_path_entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
+        self.fe_path_entry.insert(0, "/sdcard")
+        self.fe_path_entry.bind("<Return>", lambda e: self._navigate_to(self.fe_path_entry.get().strip()))
+        ctk.CTkButton(fe_bar, text="Go", width=45, height=28, command=lambda: self._navigate_to(self.fe_path_entry.get().strip())).pack(side="left", padx=(0, 4))
+        ctk.CTkButton(fe_bar, text="⟳ Refresh", width=75, height=28, command=self.refresh_file_explorer).pack(side="left", padx=(0, 4))
+        ctk.CTkButton(fe_bar, text="📁 New Dir", width=80, height=28, fg_color=("gray75", "gray25"), command=self._mkdir_dialog).pack(side="left", padx=(0, 4))
         ctk.CTkButton(fe_bar, text="📤 Upload Here", width=105, height=28, fg_color="#1976D2", command=self._upload_to_current_dir).pack(side="left", padx=4)
 
         fe_quick = ctk.CTkFrame(fe_card, height=28, fg_color="transparent")
