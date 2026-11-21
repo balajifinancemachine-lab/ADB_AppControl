@@ -640,3 +640,33 @@ def test_no_hardcoded_user_profile_paths(app):
             assert f"BASE_DIR, {quote}{category}{quote}" not in source, (
                 f"data path {category!r} must go through DATA_DIR"
             )
+
+
+def test_ai_brain_engine_on_demand_lifecycle(app, tmp_path):
+    """Verifies that AIBrainEngine defaults to on-demand (no subprocess on init), saving RAM."""
+    db_file = str(tmp_path / "test_brain.db")
+    engine = app.AIBrainEngine(db_path=db_file, autostart=False)
+    assert engine.is_ready is False
+    assert engine.is_starting is False
+    assert engine._proc is None
+    assert "offline" in engine.status_msg.lower()
+
+    # Asking while offline should return a helpful prompt rather than crashing or freezing
+    resp = engine.ask("What is bloatware?")
+    assert "offline" in resp.lower()
+
+    # Direct copilot actions (screenshot, battery, etc.) work without loading the model
+    stub_engine = type("E", (), {})()
+    stub_engine.take_screenshot = lambda serial="": True
+    stub_engine.get_device_dir = lambda cat, serial="": "/tmp/screenshots"
+    stub_engine.current_device = type("D", (), {"serial": "DEV123", "device_model": "Phone"})()
+    store = type("S", (), {"adb_engine": stub_engine})()
+
+    ans, act = engine.execute_copilot_turn("take screenshot", stub_engine, store)
+    assert act == {"action": "screenshot", "success": True}
+    assert "screenshot saved" in ans.lower()
+
+    # Stopping a stopped engine is safe and idempotent
+    engine.stop_server()
+    assert engine.is_ready is False
+    assert engine._proc is None

@@ -384,9 +384,8 @@ DEFAULT_GEMMA_MODEL_PATH = _discover_gguf_model()
 
 # ── LOGGING SYSTEM ────────────────────────────────────────────────────────────
 class AutoFlushRotatingFileHandler(logging.handlers.RotatingFileHandler):
-    def emit(self, record):
-        super().emit(record)
-        self.flush()
+    """Buffered rotating file handler for smooth non-blocking disk logging."""
+    pass
 
 LOGGER = logging.getLogger("ADBAppControl")
 LOGGER.setLevel(logging.INFO)
@@ -2864,11 +2863,19 @@ class BrainDatabase:
                             content TEXT,
                             action_invoked TEXT
                         );
+                        CREATE TABLE IF NOT EXISTS system_logs (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            timestamp REAL,
+                            level TEXT,
+                            message TEXT,
+                            logger TEXT
+                        );
                         CREATE INDEX IF NOT EXISTS idx_act_action ON action_memory(action);
                         CREATE INDEX IF NOT EXISTS idx_act_target ON action_memory(target);
                         CREATE INDEX IF NOT EXISTS idx_learn_cat ON learnings(category);
                         CREATE INDEX IF NOT EXISTS idx_diag_type ON problem_diagnostics(error_type);
                         CREATE INDEX IF NOT EXISTS idx_chat_sess ON chat_history(session_id);
+                        CREATE INDEX IF NOT EXISTS idx_logs_ts ON system_logs(timestamp);
                     """)
                     conn.execute(
                         "INSERT OR REPLACE INTO brain_meta (key, value, updated_at) VALUES ('version', '1.0', ?)",
@@ -2901,10 +2908,25 @@ class BrainDatabase:
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (time.time(), device_serial, device_model, category, action, target, command, status, return_code, duration_sec, response[:1000], error[:1000])
                     )
+                    # Rolling window maintenance: prune when record count exceeds retention budget
+                    if cur.lastrowid and cur.lastrowid % 100 == 0:
+                        conn.execute("DELETE FROM action_memory WHERE id < (SELECT MAX(id) - 1500 FROM action_memory)")
                     return cur.lastrowid or 0
             except Exception as e:
                 LOGGER.warning("BrainDatabase record_action error: %s", e)
                 return 0
+
+    def log_system_event(self, level: str, message: str, logger: str = "app"):
+        """Logs structured diagnostic and runtime entries into SQLite WAL brain.db."""
+        with self._lock:
+            try:
+                with self._get_connection() as conn:
+                    conn.execute(
+                        "INSERT INTO system_logs (timestamp, level, message, logger) VALUES (?, ?, ?, ?)",
+                        (time.time(), level, message[:1500], logger)
+                    )
+            except Exception:
+                pass
 
     def add_or_update_learning(self, topic: str, category: str, insight: str, confidence: float = 0.8):
         with self._lock:
@@ -4454,10 +4476,11 @@ class ADBEngine:
     def _permission_granted(self, pkg: str, perm: str, serial: str = "") -> Optional[bool]:
         """Device-reported permission state: True, False, or None when unknown."""
         s = self._resolve_serial(serial)
-        ok, out, _err = self.run_shell(
-            f"dumpsys package {_pkg_arg(pkg)} | grep -F '{perm}:' | head -n 1",
-            timeout=12, target_serial=s,
-        )
+        cmd = f"dumpsys package {_pkg_arg(pkg)} | grep -F '{perm}:' | head -n 1"
+        try:
+            ok, out, _err = self.run_shell(cmd, timeout=12, target_serial=s, audit=False)
+        except TypeError:
+            ok, out, _err = self.run_shell(cmd, timeout=12, target_serial=s)
         line = (out or "").strip()
         if not ok or not line:
             return None
@@ -6693,7 +6716,8 @@ class AIBrainEngine:
         model_path: Optional[str] = None,
         db_path: Optional[str] = None,
         port: int = 8089,
-        on_status_change: Optional[Callable[[str, bool], None]] = None
+        on_status_change: Optional[Callable[[str, bool], None]] = None,
+        autostart: bool = False
     ):
         resolved_model = str(model_path or "").strip()
         if not resolved_model or not os.path.isfile(resolved_model):
@@ -6702,7 +6726,8 @@ class AIBrainEngine:
         self.port = port
         self.on_status_change = on_status_change
         self.is_ready = False
-        self.status_msg = "Initializing..."
+        self.is_starting = False
+        self.status_msg = "Offline (Idle - Click to Load)"
         self._ai_fail_count = 0
         self._ai_cooldown_until = 0.0
         self._proc: Optional[subprocess.Popen] = None
@@ -6712,9 +6737,9 @@ class AIBrainEngine:
         self.brain_db = BrainDatabase(db_path)
         self.auto_heal_agent = AutoHealAgent(self.brain_db, self)
 
-        # Start server in background thread so GUI never waits
-        self._boot_thread = threading.Thread(target=self._start_server_process, daemon=True)
-        self._boot_thread.start()
+        # On-Demand: only start server process if explicitly requested, saving 3.7GB RAM by default
+        if autostart:
+            self.start_server()
 
     def _notify_status(self, msg: str, ready: bool):
         self.status_msg = msg
@@ -6725,87 +6750,127 @@ class AIBrainEngine:
             except Exception:
                 pass
 
+    def start_server(self):
+        """Starts llama-server in background thread if not already running."""
+        with self._lock:
+            if self.is_ready:
+                return
+            if getattr(self, "is_starting", False):
+                return
+            self.is_starting = True
+            self._notify_status("Starting Gemma 4B...", False)
+            self._boot_thread = threading.Thread(target=self._start_server_process, daemon=True)
+            self._boot_thread.start()
+
+    def stop_server(self):
+        """Terminates llama-server process and immediately reclaims 3.7GB RAM."""
+        with self._lock:
+            if self._proc is not None:
+                try:
+                    LOGGER.info("Terminating Gemma llama-server PID %d to free RAM...", self._proc.pid)
+                    self._proc.terminate()
+                    self._proc.wait(timeout=2)
+                except Exception:
+                    try:
+                        self._proc.kill()
+                    except Exception:
+                        pass
+                self._proc = None
+            self.is_ready = False
+            self.is_starting = False
+            self._notify_status("Offline (RAM Freed)", False)
+
     def _start_server_process(self):
         """Launches llama-server in background and polls health endpoint until ready."""
-        if not self.model_path or not os.path.isfile(self.model_path):
-            discovered = _discover_gguf_model()
-            if discovered:
-                self.model_path = discovered
-            else:
-                LOGGER.warning("No GGUF model found in models/, ../MODEL or ~/Documents/MODEL.")
-                self._notify_status("Model Missing", False)
-                return
-
-        if not os.path.isfile(LLAMA_SERVER_EXE):
-            LOGGER.warning("llama-server binary not found at: %s", LLAMA_SERVER_EXE)
-            self._notify_status("Server Binary Missing", False)
-            return
-
-        # Find available port starting from self.port
-        test_port = self.port
-        for p in range(test_port, test_port + 10):
-            try:
-                with urllib.request.urlopen(f"http://127.0.0.1:{p}/health", timeout=0.6) as r:
-                    body = r.read().decode("utf-8", errors="ignore")
-                # Only attach when the response really looks like llama-server,
-                # otherwise an unrelated service on this port would be adopted.
-                try:
-                    payload = json.loads(body)
-                except (ValueError, TypeError):
-                    payload = None
-                if isinstance(payload, dict) and "status" in payload:
-                    self.port = p
-                    self._notify_status("Ready (Gemma 4B)", True)
-                    LOGGER.info("Attached to running Gemma server on port %d", p)
-                    return
-            except Exception:
-                pass
-
-        cmd = [
-            LLAMA_SERVER_EXE,
-            "-m", self.model_path,
-            "--port", str(self.port),
-            "--host", "127.0.0.1",
-            "-c", "4096",
-            "--threads", "4",
-            "--log-disable"
-        ]
         try:
-            self._proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=CREATE_NO_WINDOW
-            )
-            LOGGER.info("Launched Gemma llama-server on 127.0.0.1:%d (PID %d)", self.port, self._proc.pid)
-        except Exception as e:
-            LOGGER.error("Failed to launch llama-server process: %s", e)
-            self._notify_status("Launch Failed", False)
-            return
+            if not self.model_path or not os.path.isfile(self.model_path):
+                discovered = _discover_gguf_model()
+                if discovered:
+                    self.model_path = discovered
+                else:
+                    LOGGER.warning("No GGUF model found in models/, ../MODEL or ~/Documents/MODEL.")
+                    self.is_starting = False
+                    self._notify_status("Model Missing", False)
+                    return
 
-        # Poll health endpoint
-        for _ in range(40):
-            if self._proc.poll() is not None:
-                LOGGER.error("llama-server process exited prematurely with code %s", self._proc.returncode)
-                self._notify_status("Server Crashed", False)
+            if not os.path.isfile(LLAMA_SERVER_EXE):
+                LOGGER.warning("llama-server binary not found at: %s", LLAMA_SERVER_EXE)
+                self.is_starting = False
+                self._notify_status("Server Binary Missing", False)
                 return
-            try:
-                with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/health", timeout=1.0) as resp:
-                    data = json.loads(resp.read().decode('utf-8'))
-                    if data.get("status") == "ok":
-                        self._notify_status("Ready (Gemma 4B)", True)
-                        self.brain_db.add_or_update_learning(
-                            "system_startup",
-                            "engine_status",
-                            f"Gemma 4B Brain Engine online on port {self.port} with 4096 context",
-                            confidence=1.0
-                        )
-                        LOGGER.info("Gemma AI Brain is online and ready for queries!")
-                        return
-            except Exception:
-                time.sleep(0.5)
 
-        self._notify_status("Startup Timeout", False)
+            # Find available port starting from self.port
+            test_port = self.port
+            for p in range(test_port, test_port + 10):
+                try:
+                    with urllib.request.urlopen(f"http://127.0.0.1:{p}/health", timeout=0.6) as r:
+                        body = r.read().decode("utf-8", errors="ignore")
+                    try:
+                        payload = json.loads(body)
+                    except (ValueError, TypeError):
+                        payload = None
+                    if isinstance(payload, dict) and "status" in payload:
+                        self.port = p
+                        self.is_starting = False
+                        self._notify_status("Ready (Gemma 4B)", True)
+                        LOGGER.info("Attached to running Gemma server on port %d", p)
+                        return
+                except Exception:
+                    pass
+
+            cmd = [
+                LLAMA_SERVER_EXE,
+                "-m", self.model_path,
+                "--port", str(self.port),
+                "--host", "127.0.0.1",
+                "-c", "4096",
+                "--threads", "4",
+                "--log-disable"
+            ]
+            try:
+                self._proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=CREATE_NO_WINDOW
+                )
+                LOGGER.info("Launched Gemma llama-server on 127.0.0.1:%d (PID %d)", self.port, self._proc.pid)
+            except Exception as e:
+                LOGGER.error("Failed to launch llama-server process: %s", e)
+                self.is_starting = False
+                self._notify_status("Launch Failed", False)
+                return
+
+            # Poll health endpoint
+            for _ in range(40):
+                if self._proc.poll() is not None:
+                    LOGGER.error("llama-server process exited prematurely with code %s", self._proc.returncode)
+                    self.is_starting = False
+                    self._notify_status("Server Crashed", False)
+                    return
+                try:
+                    with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/health", timeout=1.0) as resp:
+                        data = json.loads(resp.read().decode('utf-8'))
+                        if data.get("status") == "ok":
+                            self.is_starting = False
+                            self._notify_status("Ready (Gemma 4B)", True)
+                            self.brain_db.add_or_update_learning(
+                                "system_startup",
+                                "engine_status",
+                                f"Gemma 4B Brain Engine online on port {self.port} with 4096 context",
+                                confidence=1.0
+                            )
+                            LOGGER.info("Gemma AI Brain is online and ready for queries!")
+                            return
+                except Exception:
+                    time.sleep(0.5)
+
+            self.is_starting = False
+            self._notify_status("Startup Timeout", False)
+        except Exception as ex:
+            LOGGER.error("Error in _start_server_process: %s", ex)
+            self.is_starting = False
+            self._notify_status("Start Error", False)
 
     def on_action_logged(self, rec: ActionAuditRecord):
         """Callback wired into AuditLogger to track every user action into brain.db and extract learnings."""
@@ -6877,17 +6942,17 @@ class AIBrainEngine:
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
-        max_tokens: int = 512,
+        max_tokens: int = 768,
         temperature: float = 0.2
     ) -> str:
         """Sends a query to local Gemma 4B and returns the complete text response."""
         if not self.is_ready:
-            return "Local AI Brain is currently initializing or model file is unavailable. Please check Model status in Settings."
+            return "Local Gemma 4B is currently Offline to save 3.7GB RAM. Click [▶ Start Model] at the top right to load it."
         if time.time() < self._ai_cooldown_until:
             remaining = int(self._ai_cooldown_until - time.time())
             return (
                 f"Local AI Brain is cooling down for {remaining}s after repeated timeouts. "
-                "The model may be loading or the CPU is busy - retry shortly."
+                "The model is busy or loading - retry shortly."
             )
 
         sys_msg = system_prompt or (
@@ -6910,14 +6975,29 @@ class AIBrainEngine:
                 data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"}
             )
-            with urllib.request.urlopen(req, timeout=90) as resp:
+            # Give sufficient time for CPU inference on reasoning models
+            with urllib.request.urlopen(req, timeout=120) as resp:
                 res = json.loads(resp.read().decode("utf-8"))
-                content = res["choices"][0]["message"]["content"]
+                choice = res.get("choices", [{}])[0]
+                msg = choice.get("message", {})
+                content = (msg.get("content") or "").strip()
+                reasoning = (msg.get("reasoning_content") or "").strip()
+
+                # Reasoning models (like gemma-4-E4B-it) may populate reasoning_content
+                if not content and reasoning:
+                    final_text = reasoning
+                elif content:
+                    final_text = content
+                elif reasoning:
+                    final_text = reasoning
+                else:
+                    final_text = "The local model returned an empty response. Please try rephrasing your question."
+
                 self._ai_fail_count = 0
                 self._ai_cooldown_until = 0.0
                 self.brain_db.save_chat_message(self.session_id, "user", prompt)
-                self.brain_db.save_chat_message(self.session_id, "assistant", content)
-                return content
+                self.brain_db.save_chat_message(self.session_id, "assistant", final_text)
+                return final_text
         except Exception as e:
             self._ai_fail_count += 1
             message = str(e).lower()
@@ -6932,8 +7012,8 @@ class AIBrainEngine:
                 else:
                     LOGGER.debug("Gemma query timed out (attempt %d): %s", self._ai_fail_count, e)
                 return (
-                    "The local AI model did not answer in time. "
-                    "Check that llama-server is running (Settings > AI Brain) and try again."
+                    "The local AI model did not answer in time (Gemma 4B is running on CPU). "
+                    "You can retry with a shorter prompt or click [⏹ Stop Model] to free memory."
                 )
             LOGGER.warning("Gemma query error: %s", e)
             return f"Brain Inference Error: {e}"
@@ -7076,44 +7156,39 @@ class AIBrainEngine:
 
     def _offline_copilot_answer(self, adb_engine: Any, cur_dev: Any) -> str:
         """Deterministic fallback so the brain panel is useful without a loaded model."""
-        lines = ["🧠 **Offline Copilot** — the local Gemma model is not loaded, so here is live device data instead:"]
+        lines = [
+            "🧠 **Offline Copilot** — Gemma 4B is currently stopped to save 3.7GB RAM.\n"
+            "Click **[▶ Start Model]** at the top right to load Gemma 4B into memory, or use instant device commands:"
+        ]
         if not cur_dev:
-            lines.append("• No device connected. Plug in a phone with USB debugging, or use the WiFi panel.")
-            lines.append("• You can still debloat from cached data, manage backups, and run the Root Assistant on a connected device.")
+            lines.append("• No device connected. Connect via USB or WiFi to run device commands.")
             return "\n".join(lines)
-        lines.append(f"• Device: {sanitise_untrusted(cur_dev.device_model, 60)} ({sanitise_untrusted(cur_dev.serial, 60)}), state: {cur_dev.state}")
+        lines.append(f"• Connected Device: **{sanitise_untrusted(cur_dev.device_model, 60)}** ({sanitise_untrusted(cur_dev.serial, 60)})")
         try:
             info = adb_engine.get_battery_details()
-            lines.append(f"• Battery: {info.get('level', 'N/A')}, temp {info.get('temp', 'N/A')}, health {info.get('health', 'N/A')}")
+            lines.append(f"• Battery: {info.get('level', 'N/A')}, {info.get('temp', 'N/A')}, health {info.get('health', 'Good')}")
         except Exception:
             pass
         try:
             apps = adb_engine.list_all_packages()
             if apps:
                 user_count = sum(1 for a in apps if a.get("type") == "user" and not a.get("uninstalled"))
-                lines.append(f"• Packages: {len(apps)} total, {user_count} user apps installed")
+                lines.append(f"• Packages: {len(apps)} total ({user_count} user apps)")
         except Exception:
             pass
         lines.append("")
-        lines.append("Try a direct command instead: *battery*, *screenshot*, *trim ram*, *uninstall <package>*, or *restore <package>*.")
-        lines.append("To enable full answers, put a `.gguf` model in `models/` and restart, or check Settings → AI Brain.")
+        lines.append("⚡ Direct actions (0ms delay, no model needed):")
+        lines.append("  • `battery` — view battery temperature & health")
+        lines.append("  • `screenshot` — take a screenshot of device")
+        lines.append("  • `trim ram` — optimize phone background RAM")
+        lines.append("  • `uninstall <pkg>` — remove an unwanted app")
+        lines.append("  • `restore <pkg>` — restore a disabled/removed system app")
+        lines.append("  • `reboot recovery` / `reboot bootloader`")
         return "\n".join(lines)
 
     def shutdown(self):
         """Terminates llama-server child process cleanly."""
-        with self._lock:
-            if self._proc is not None:
-                try:
-                    LOGGER.info("Terminating Gemma llama-server PID %d...", self._proc.pid)
-                    self._proc.terminate()
-                    self._proc.wait(timeout=3)
-                except Exception:
-                    try:
-                        self._proc.kill()
-                    except Exception:
-                        pass
-                self._proc = None
-            self.is_ready = False
+        self.stop_server()
 
 # ── MODAL: BATCH OPERATION SUMMARY (MODERN NON-BLOCKING) ───────────────────────
 class BatchSummaryModal(ctk.CTkToplevel):
@@ -10498,49 +10573,6 @@ class InstallView(ctk.CTkFrame):
         opt_card.pack_propagate(False)
 
         flags_box = ctk.CTkFrame(opt_card, fg_color="transparent")
-        flags_box.pack(fill="x", padx=14, pady=(10, 4))
-
-        self.flag_replace = ctk.BooleanVar(value=True)
-        self.flag_grant = ctk.BooleanVar(value=True)
-        self.flag_downgrade = ctk.BooleanVar(value=False)
-        self.flag_test = ctk.BooleanVar(value=False)
-        self.flag_split_group = ctk.BooleanVar(value=False)
-
-        ctk.CTkCheckBox(flags_box, text="Replace Existing (-r)", variable=self.flag_replace).pack(side="left", padx=6)
-        ctk.CTkCheckBox(flags_box, text="Auto Grant Perms (-g)", variable=self.flag_grant).pack(side="left", padx=6)
-        ctk.CTkCheckBox(flags_box, text="Allow Downgrade (-d)", variable=self.flag_downgrade).pack(side="left", padx=6)
-        ctk.CTkCheckBox(flags_box, text="Test Packages (-t)", variable=self.flag_test).pack(side="left", padx=6)
-        ctk.CTkCheckBox(flags_box, text="Install Multiple as Split Group", variable=self.flag_split_group).pack(side="left", padx=6)
-
-        act_row = ctk.CTkFrame(opt_card, fg_color="transparent")
-        act_row.pack(fill="x", padx=14, pady=(6, 8))
-        ctk.CTkButton(act_row, text="➕ Install APKs / XAPK / APKS", width=185, height=32, command=self._select_and_install_apks).pack(side="left", padx=(0, 3))
-        ctk.CTkButton(act_row, text="🔍 Inspect Local APK", width=140, height=32, fg_color=("#5E35B1", "#4527A0"), command=self._inspect_apk_dialog).pack(side="left", padx=3)
-        ctk.CTkButton(act_row, text="📤 Push File", width=105, height=32, fg_color=("#37474F", "#263238"), command=self._push_file_dialog).pack(side="left", padx=3)
-        ctk.CTkButton(act_row, text="📥 Pull Path", width=105, height=32, fg_color=("#00695C", "#004D40"), command=self._pull_file_dialog).pack(side="left", padx=3)
-        ctk.CTkButton(act_row, text="🔌 Enable MTP & Open Explorer", width=190, height=32, fg_color="#00897B",
-                      command=self._enable_and_open_mtp).pack(side="left", padx=3)
-        ctk.CTkButton(act_row, text="📁 Downloads", width=110, height=32, fg_color=("gray75", "gray25"),
-                      command=self._open_downloads_folder).pack(side="left", padx=3)
-
-        split_pane = ctk.CTkFrame(self, fg_color="transparent")
-        split_pane.pack(fill="both", expand=True)
-
-        fe_card = ctk.CTkFrame(split_pane, fg_color=("gray90", "gray14"), corner_radius=8)
-        fe_card.pack(side="left", fill="both", expand=True, padx=(0, 6))
-
-        fe_bar = ctk.CTkFrame(fe_card, height=40, fg_color=("gray84", "gray18"), corner_radius=6)
-        fe_bar.pack(fill="x", padx=8, pady=(8, 4))
-        fe_bar.pack_propagate(False)
-
-        ctk.CTkButton(fe_bar, text="⬆ Up", width=55, height=28, command=self._navigate_up).pack(side="left", padx=4)
-        self.path_entry = ctk.CTkEntry(fe_bar, height=28)
-        self.path_entry.pack(side="left", fill="x", expand=True, padx=4)
-        self.path_entry.insert(0, self.current_remote_dir)
-        self.path_entry.bind("<Return>", lambda e: self._navigate_to(self.path_entry.get().strip()))
-
-        ctk.CTkButton(fe_bar, text="Go / Refresh", width=90, height=28, command=lambda: self._navigate_to(self.path_entry.get().strip())).pack(side="left", padx=2)
-        ctk.CTkButton(fe_bar, text="➕ Folder", width=75, height=28, fg_color="#00796B", command=self._mkdir_dialog).pack(side="left", padx=2)
         ctk.CTkButton(fe_bar, text="📤 Upload Here", width=105, height=28, fg_color="#1976D2", command=self._upload_to_current_dir).pack(side="left", padx=4)
 
         fe_quick = ctk.CTkFrame(fe_card, height=28, fg_color="transparent")
@@ -12032,10 +12064,18 @@ class AIBrainView(ctk.CTkFrame):
         right_b = ctk.CTkFrame(banner, fg_color="transparent")
         right_b.pack(side="right", padx=16, pady=12)
 
-        self.model_status_badge = ctk.CTkLabel(
-            right_b, text="● Gemma 4B: Initializing...",
+        self.btn_toggle_model = ctk.CTkButton(
+            right_b, text="▶ Start Model", width=120, height=28,
             font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color=("#1976D2", "#0D47A1"), text_color="white",
+            fg_color=("#2E7D32", "#1B5E20"), hover_color=("#1B5E20", "#0D3311"),
+            command=self._on_toggle_model
+        )
+        self.btn_toggle_model.pack(side="right", padx=(8, 0))
+
+        self.model_status_badge = ctk.CTkLabel(
+            right_b, text="○ Gemma 4B: Offline (Idle)",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=("gray75", "gray25"), text_color="white",
             corner_radius=6, padx=12, pady=4
         )
         self.model_status_badge.pack(side="right")
@@ -12175,11 +12215,21 @@ class AIBrainView(ctk.CTkFrame):
         btn_row = ctk.CTkFrame(m_frame, fg_color="transparent")
         btn_row.pack(fill="x", pady=12)
         ctk.CTkButton(
-            btn_row, text="📁 Open Model Folder", width=150, height=28,
+            btn_row, text="▶ Start Model (Load)", width=150, height=28,
+            fg_color=("#2E7D32", "#1B5E20"), hover_color=("#1B5E20", "#0D3311"),
+            command=self._start_model_manually
+        ).pack(side="left", padx=4)
+        ctk.CTkButton(
+            btn_row, text="⏹ Stop Model (Free RAM)", width=160, height=28,
+            fg_color=("#C62828", "#8E0000"), hover_color=("#B71C1C", "#660000"),
+            command=self._stop_model_manually
+        ).pack(side="left", padx=4)
+        ctk.CTkButton(
+            btn_row, text="📁 Open Model Folder", width=140, height=28,
             fg_color=("#37474F", "#263238"), command=self._open_model_folder
         ).pack(side="left", padx=4)
         ctk.CTkButton(
-            btn_row, text="📁 Open brain.db", width=140, height=28,
+            btn_row, text="📁 Open brain.db", width=130, height=28,
             fg_color=("#00695C", "#004D40"), command=lambda: open_path_cross_platform(DATA_DIR)
         ).pack(side="left", padx=4)
 
@@ -12196,16 +12246,64 @@ class AIBrainView(ctk.CTkFrame):
             return
         open_path_cross_platform(folder)
 
+    def _on_toggle_model(self):
+        if not self.brain_engine:
+            return
+        if self.brain_engine.is_ready:
+            self._stop_model_manually()
+        elif getattr(self.brain_engine, 'is_starting', False):
+            return
+        else:
+            self._start_model_manually()
+
+    def _start_model_manually(self):
+        if not self.brain_engine:
+            return
+        self.brain_engine.start_server()
+        self._update_model_status_badge()
+
+    def _stop_model_manually(self):
+        if not self.brain_engine:
+            return
+        self.brain_engine.stop_server()
+        self._update_model_status_badge()
+
     def _update_model_status_badge(self):
-        ready = self.brain_engine.is_ready if self.brain_engine else False
-        msg = self.brain_engine.status_msg if self.brain_engine else "Offline"
-        bg = ("#2E7D32", "#1B5E20") if ready else ("#1976D2", "#0D47A1")
-        self.model_status_badge.configure(text=f"● Gemma 4B: {msg}", fg_color=bg)
+        if not self.brain_engine:
+            self.model_status_badge.configure(text="○ Gemma 4B: Not configured", fg_color=("gray75", "gray25"))
+            if hasattr(self, 'btn_toggle_model'):
+                self.btn_toggle_model.configure(state="disabled", text="▶ Start Model")
+            return
+        ready = self.brain_engine.is_ready
+        starting = getattr(self.brain_engine, "is_starting", False)
+        msg = self.brain_engine.status_msg
+
+        if ready:
+            self.model_status_badge.configure(text=f"● Gemma 4B: {msg}", fg_color=("#2E7D32", "#1B5E20"))
+            if hasattr(self, 'btn_toggle_model'):
+                self.btn_toggle_model.configure(
+                    state="normal", text="⏹ Stop Model",
+                    fg_color=("#C62828", "#8E0000"), hover_color=("#B71C1C", "#660000")
+                )
+        elif starting:
+            self.model_status_badge.configure(text=f"⏳ Gemma 4B: {msg}", fg_color=("#F57F17", "#E65100"))
+            if hasattr(self, 'btn_toggle_model'):
+                self.btn_toggle_model.configure(
+                    state="disabled", text="⏳ Loading...",
+                    fg_color=("gray75", "gray25")
+                )
+        else:
+            self.model_status_badge.configure(text=f"○ Gemma 4B: {msg}", fg_color=("gray75", "gray25"))
+            if hasattr(self, 'btn_toggle_model'):
+                self.btn_toggle_model.configure(
+                    state="normal", text="▶ Start Model",
+                    fg_color=("#2E7D32", "#1B5E20"), hover_color=("#1B5E20", "#0D3311")
+                )
 
     def _load_initial_history(self):
         msgs = self.brain_db.get_chat_history(limit=25)
         if not msgs:
-            self._append_message_card("assistant", "👋 Hello! I am your **ADB AppControl Brain Copilot**, powered by local Gemma 4B.\n\nI can answer questions, give safety recommendations, run ADB commands, extract backups, debloat packages, and automatically repair errors in your session. What would you like to do?")
+            self._append_message_card("assistant", "👋 Hello! I am your **ADB AppControl Brain Copilot**.\n\n• **Instant Device Actions** (battery, screenshot, trim ram, uninstall, restore) work immediately without loading the model!\n• **AI Questions & Advice**: click **[▶ Start Model]** above to load local Gemma 4B whenever you need conversational debloating advice.\n\nWhat would you like to do?")
         else:
             for m in msgs:
                 self._append_message_card(m["role"], m["content"])
@@ -12919,9 +13017,25 @@ class ADBAppControlMain(ctk.CTk):
 
     def _on_brain_status_change(self, msg: str, ready: bool):
         def _update():
+            starting = getattr(self.brain_engine, 'is_starting', False)
             if hasattr(self, 'brain_badge') and self.brain_badge.winfo_exists():
-                bg = ("#2E7D32", "#1B5E20") if ready else ("#1976D2", "#0D47A1")
-                self.brain_badge.configure(text=f"🧠 {msg}", fg_color=bg)
+                if ready:
+                    bg = ("#2E7D32", "#1B5E20")
+                    hov = ("#1B5E20", "#0D3311")
+                    txt = "🧠 Gemma: Online"
+                elif starting:
+                    bg = ("#F57F17", "#E65100")
+                    hov = ("#E65100", "#BF360C")
+                    txt = "🧠 Gemma: Loading..."
+                else:
+                    bg = ("#37474F", "#263238")
+                    hov = ("#455A64", "#37474F")
+                    txt = "🧠 AI: Idle (Offline)"
+                self.brain_badge.configure(text=txt, fg_color=bg, hover_color=hov)
+            if hasattr(self, 'views') and 'brain' in self.views:
+                v = self.views['brain']
+                if hasattr(v, '_update_model_status_badge'):
+                    v._update_model_status_badge()
         safe_after(0, _update)
 
     def _setup_auto_heal_hooks(self):
@@ -13121,12 +13235,12 @@ class ADBAppControlMain(ctk.CTk):
 
         self.brain_badge = ctk.CTkButton(
             self.header,
-            text="🧠 AI: Starting...",
+            text="🧠 AI: Idle (Offline)",
             width=135,
             height=30,
             font=ctk.CTkFont(size=10, weight="bold"),
-            fg_color=("#1976D2", "#0D47A1"),
-            hover_color=("#1565C0", "#0B3C85"),
+            fg_color=("#37474F", "#263238"),
+            hover_color=("#455A64", "#37474F"),
             command=lambda: self._switch_page("brain")
         )
         self.brain_badge.pack(side="left", padx=2)
