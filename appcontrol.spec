@@ -12,13 +12,31 @@ build_release.bat copies tools/ into dist/ADB_AppControl/ for you.
 from PyInstaller.utils.hooks import collect_data_files
 
 datas = collect_data_files("customtkinter")
+datas += [("web", "web")]
 
 a = Analysis(
     ["appcontrol.pyw"],
     pathex=[],
     binaries=[],
     datas=datas,
-    hiddenimports=["PIL._tkinter_finder"],
+    hiddenimports=[
+        "PIL._tkinter_finder",
+        "fastapi",
+        "starlette",
+        "uvicorn",
+        "uvicorn.logging",
+        "uvicorn.loops",
+        "uvicorn.loops.auto",
+        "uvicorn.protocols",
+        "uvicorn.protocols.http",
+        "uvicorn.protocols.http.auto",
+        "uvicorn.protocols.websockets",
+        "uvicorn.protocols.websockets.auto",
+        "uvicorn.lifespan",
+        "uvicorn.lifespan.on",
+        "websockets",
+        "sqlite3",
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

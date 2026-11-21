@@ -8,6 +8,10 @@ python -m PyInstaller --noconfirm --clean appcontrol.spec || goto :error
 
 echo.
 echo Build complete: dist\ADB_AppControl\ADB_AppControl.exe
+if exist web\ (
+    xcopy /E /I /Y /Q web "dist\ADB_AppControl\web" >nul
+    echo Copied web\ assets next to the executable.
+)
 if exist tools\ (
     xcopy /E /I /Y /Q tools "dist\ADB_AppControl\tools" >nul
     echo Copied tools\ (adb, scrcpy, llama, models) next to the executable.

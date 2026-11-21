@@ -17,7 +17,7 @@ import time
 import webbrowser
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
@@ -426,6 +426,42 @@ def create_app(store_provider=None) -> FastAPI:
         threading.Thread(target=lambda: store.update_app_data(engine.list_all_packages()), daemon=True).start()
         return {"success": True, "results": results}
 
+    @app.post("/api/apps/upload_install")
+    async def upload_and_install_apk(
+        files: list[UploadFile] = File(...),
+        replace: bool = True,
+        grant_perms: bool = True,
+        downgrade: bool = False,
+        test_pkg: bool = False,
+    ):
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if not cur:
+            raise HTTPException(status_code=400, detail="No device connected")
+
+        upload_dir = os.path.join(DATA_DIR, "cache", "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+
+        saved_paths = []
+        for file in files:
+            file_path = os.path.join(upload_dir, file.filename)
+            content = await file.read()
+            with open(file_path, "wb") as f:
+                f.write(content)
+            saved_paths.append(file_path)
+
+        ok, msg = engine.install_apks(
+            saved_paths,
+            replace=replace,
+            downgrade=downgrade,
+            grant_perms=grant_perms,
+            test_pkg=test_pkg,
+            serial=serial,
+        )
+        return {"success": ok, "message": msg, "files": [f.filename for f in files]}
+
     @app.get("/api/apps/details/{pkg}")
     def get_app_details(pkg: str):
         store = _get_store()
@@ -666,6 +702,22 @@ def create_app(store_provider=None) -> FastAPI:
         serial = cur.serial if cur else ""
         ok, out, err = store.adb_engine.run_shell(f"input tap {x} {y}", target_serial=serial)
         return {"success": ok}
+
+    @app.post("/api/screen/swipe")
+    def handle_screen_swipe(payload: dict[str, Any]):
+        x1 = payload.get("x1", 540)
+        y1 = payload.get("y1", 1200)
+        x2 = payload.get("x2", 540)
+        y2 = payload.get("y2", 600)
+        duration_ms = payload.get("duration", 250)
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        ok, out, err = store.adb_engine.run_shell(
+            f"input swipe {x1} {y1} {x2} {y2} {duration_ms}",
+            target_serial=serial
+        )
+        return {"success": ok, "message": (out or err).strip()}
 
     @app.post("/api/screen/key")
     def send_keycode(payload: dict[str, Any]):

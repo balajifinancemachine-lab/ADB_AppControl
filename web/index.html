@@ -896,6 +896,54 @@ footer {
   font-size: 12px;
 }
 
+/* Drag & Drop APK Installation Zone */
+.dropzone-container {
+  border: 2px dashed rgba(56, 189, 248, 0.35);
+  border-radius: 8px;
+  background: rgba(17, 24, 38, 0.6);
+  padding: 24px;
+  text-align: center;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+.dropzone-container:hover, .dropzone-container.dragover {
+  border-color: var(--accent-blue);
+  background: rgba(37, 99, 235, 0.08);
+}
+.dropzone-icon {
+  font-size: 32px;
+  color: var(--accent-blue);
+  margin-bottom: 8px;
+}
+.dropzone-title {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+.dropzone-sub {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Telemetry Chart Card */
+.chart-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+
 
   </style>
 </head>
@@ -1187,6 +1235,17 @@ footer {
           </div>
         </div>
 
+        
+        <div class="chart-card">
+          <div class="chart-header">
+            <span><i class="fa-solid fa-chart-line" style="color:var(--accent-teal);"></i> Live Device Hardware Performance (RAM & CPU History)</span>
+            <span style="font-size:11px; color:var(--text-muted);">● <span style="color:#38BDF8;">RAM %</span>  ● <span style="color:#A855F7;">CPU %</span></span>
+          </div>
+          <div style="height:110px;">
+            <canvas id="telemetryChart"></canvas>
+          </div>
+        </div>
+
         <div class="table-container">
           <table>
             <thead>
@@ -1267,7 +1326,7 @@ footer {
         <div class="screen-container">
           <!-- Smartphone Display Bezel Frame -->
           <div class="screen-preview-card">
-            <div id="screen-preview-box" class="screen-preview-box" onclick="handleScreenTap(event)" title="Click anywhere on screen to tap device">
+            <div id="screen-preview-box" class="screen-preview-box" onmousedown="startScreenGesture(event)" onmouseup="endScreenGesture(event)" title="Click anywhere on screen to tap device">
               <span id="screen-placeholder" style="color:var(--text-muted); padding:40px;">No screenshot captured yet.<br>Click 'Capture Screen' below.</span>
             </div>
             
@@ -1395,6 +1454,16 @@ footer {
           <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px;">
             <input type="checkbox" id="inst-test" title="Allow Test Packages (-t)" aria-label="Allow Test Packages"> Test Packages (-t)
           </label>
+        </div>
+
+        
+        <!-- Drag & Drop APK Installation Dropzone -->
+        <div id="apk-dropzone" class="dropzone-container" onclick="document.getElementById('apk-file-input').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleFileDrop(event)">
+          <i class="fa-solid fa-cloud-arrow-up dropzone-icon"></i>
+          <div class="dropzone-title">Drop .apk, .xapk, or .apks files here to install</div>
+          <div class="dropzone-sub">or click to browse your computer</div>
+          <input type="file" id="apk-file-input" multiple accept=".apk,.xapk,.apks" style="display:none;" onchange="handleFileSelect(event)" title="Choose APK files" aria-label="Choose APK files">
+          <div id="upload-status" style="margin-top:8px; font-weight:bold; color:var(--accent-blue);"></div>
         </div>
 
         <!-- Remote Explorer Breadcrumbs & Toolbar -->
@@ -1706,6 +1775,7 @@ footer {
       checkBackendConnectivity();
       refreshDevicesList();
       loadJournal();
+      initTelemetryChart();
     });
 
     async function checkBackendConnectivity() {
@@ -1768,6 +1838,7 @@ footer {
       else if (tabId === 'permissions') loadPermissions();
       else if (tabId === 'files') navigateFiles();
       else if (tabId === 'journal') loadJournal();
+      initTelemetryChart();
       else if (tabId === 'terminal') loadLogcat();
     }
 
@@ -2523,6 +2594,7 @@ footer {
       const data = await res.json();
       alert(data.message || 'Rollback finished.');
       loadJournal();
+      initTelemetryChart();
       loadApps();
     }
 
