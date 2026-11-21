@@ -4,6 +4,8 @@ ADB AppControl Universal — Single Monolithic Edition (appcontrol.pyw)
 All-in-one non-modular architecture: Engine, Views, Rescue/Unbrick Center, MTP/Fastboot/ADB, and Reactive Store.
 Engineered for Ultra-Low Latency, Zero UI Freezing, Chunked Rendering, and Complete Device Recovery.
 """
+from __future__ import annotations
+
 
 import base64
 import contextlib
@@ -440,11 +442,422 @@ if not isinstance(sys.stdout, NullIO):
     except Exception:
         pass
 
-try:
-    from app_database import APP_DB, SQLiteLogHandler
-    LOGGER.addHandler(SQLiteLogHandler(APP_DB))
-except Exception:
-    APP_DB = None
+# ── UNIFIED SQLITE WAL DATABASE ENGINE (STANDALONE MONOLITHIC) ───────────────
+DB_PATH = os.path.join(DATA_DIR, "appcontrol.db")
+
+class AppDatabase:
+    """Thread-safe, WAL-mode SQLite database engine for ADB AppControl."""
+
+    def __init__(self, db_path: str | None = None):
+        self.db_path = os.path.normpath(os.path.abspath(db_path or DB_PATH))
+        self._lock = threading.RLock()
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        self._init_db()
+
+    @contextlib.contextmanager
+    def _conn(self):
+        """Yields a connection configured with WAL mode and memory temp store for max speed."""
+        conn = sqlite3.connect(self.db_path, timeout=15.0)
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA journal_mode = WAL;")
+            conn.execute("PRAGMA synchronous = NORMAL;")
+            conn.execute("PRAGMA temp_store = MEMORY;")
+            conn.execute("PRAGMA cache_size = -8000;")  # 8MB cache
+            with conn:
+                yield conn
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def _init_db(self):
+        """Initializes tables and high-speed indexes."""
+        with self._lock, self._conn() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS app_config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at REAL
+                );
+
+                CREATE TABLE IF NOT EXISTS system_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    level TEXT,
+                    logger TEXT,
+                    message TEXT,
+                    created_at REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_logs_created ON system_logs(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_logs_level ON system_logs(level);
+
+                CREATE TABLE IF NOT EXISTS audit_records (
+                    id TEXT PRIMARY KEY,
+                    timestamp TEXT,
+                    category TEXT,
+                    action TEXT,
+                    target TEXT,
+                    command TEXT,
+                    duration_sec REAL,
+                    return_code INTEGER,
+                    status TEXT,
+                    response TEXT,
+                    error TEXT,
+                    created_at REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_records(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_audit_category ON audit_records(category);
+
+                CREATE TABLE IF NOT EXISTS mutation_journal (
+                    id TEXT PRIMARY KEY,
+                    timestamp TEXT,
+                    serial TEXT,
+                    action TEXT,
+                    package_name TEXT,
+                    undo_command TEXT,
+                    label TEXT,
+                    backup_dir TEXT,
+                    undone INTEGER DEFAULT 0,
+                    created_at REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_journal_serial ON mutation_journal(serial);
+                CREATE INDEX IF NOT EXISTS idx_journal_undone ON mutation_journal(undone);
+
+                CREATE TABLE IF NOT EXISTS device_cache (
+                    serial TEXT PRIMARY KEY,
+                    model TEXT,
+                    android_version TEXT,
+                    build_id TEXT,
+                    battery_level INTEGER,
+                    state TEXT,
+                    raw_info TEXT,
+                    last_seen REAL
+                );
+
+                CREATE TABLE IF NOT EXISTS package_cache (
+                    serial TEXT,
+                    package_name TEXT,
+                    label TEXT,
+                    is_system INTEGER,
+                    is_disabled INTEGER,
+                    is_uninstalled INTEGER,
+                    apk_path TEXT,
+                    version_name TEXT,
+                    icon_path TEXT,
+                    updated_at REAL,
+                    PRIMARY KEY (serial, package_name)
+                );
+                CREATE INDEX IF NOT EXISTS idx_pkg_serial ON package_cache(serial);
+
+                CREATE TABLE IF NOT EXISTS debloat_rules (
+                    package_name TEXT PRIMARY KEY,
+                    label TEXT,
+                    category TEXT,
+                    risk_level TEXT,
+                    description TEXT,
+                    recommendation TEXT,
+                    updated_at REAL
+                );
+            """)
+
+    # ── CONFIGURATION (REPLACES app_config.json) ──────────────────────────────
+    def get_config(self, key: str, default: Any = None) -> Any:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("SELECT value FROM app_config WHERE key = ?", (key,))
+            row = cur.fetchone()
+            if not row:
+                return default
+            try:
+                return json.loads(row["value"])
+            except Exception:
+                return row["value"]
+
+    def set_config(self, key: str, value: Any):
+        val_str = json.dumps(value) if not isinstance(value, str) else value
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "INSERT INTO app_config (key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                (key, val_str, time.time())
+            )
+
+    def get_all_config(self) -> dict[str, Any]:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("SELECT key, value FROM app_config")
+            res = {}
+            for row in cur.fetchall():
+                try:
+                    res[row["key"]] = json.loads(row["value"])
+                except Exception:
+                    res[row["key"]] = row["value"]
+            return res
+
+    def import_legacy_config_file(self, config_file_path: str):
+        """Imports an existing JSON config file into SQLite."""
+        if not os.path.isfile(config_file_path):
+            return
+        try:
+            with open(config_file_path, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    self.set_config(k, v)
+        except Exception:
+            pass
+
+    # ── SYSTEM LOGGING (REPLACES PLAIN TEXT LOG DISK CHURN) ───────────────────
+    def log_message(self, level: str, logger: str, message: str):
+        ts = time.strftime("%H:%M:%S")
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "INSERT INTO system_logs (timestamp, level, logger, message, created_at) VALUES (?, ?, ?, ?, ?)",
+                (ts, level, logger, message, time.time())
+            )
+            # Prune old logs if exceeding 50,000 entries
+            conn.execute(
+                "DELETE FROM system_logs WHERE id IN ("
+                "SELECT id FROM system_logs ORDER BY id ASC LIMIT max(0, (SELECT count(*) FROM system_logs) - 50000)"
+                ")"
+            )
+
+    def get_recent_logs(self, limit: int = 200, level: str | None = None) -> list[dict[str, Any]]:
+        with self._lock, self._conn() as conn:
+            if level and level.upper() != "ALL":
+                cur = conn.execute(
+                    "SELECT * FROM system_logs WHERE level = ? ORDER BY id DESC LIMIT ?",
+                    (level.upper(), limit)
+                )
+            else:
+                cur = conn.execute(
+                    "SELECT * FROM system_logs ORDER BY id DESC LIMIT ?",
+                    (limit,)
+                )
+            rows = cur.fetchall()
+            return [dict(r) for r in reversed(rows)]
+
+    def clear_logs(self):
+        with self._lock, self._conn() as conn:
+            conn.execute("DELETE FROM system_logs")
+
+    # ── ACTION AUDIT RECORDS ──────────────────────────────────────────────────
+    def record_audit(self, audit_dict: dict[str, Any]):
+        aid = audit_dict.get("id") or f"aud_{int(time.time()*1000)}"
+        with self._lock, self._conn() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO audit_records
+                (id, timestamp, category, action, target, command, duration_sec, return_code, status, response, error, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                aid,
+                audit_dict.get("timestamp", time.strftime("%H:%M:%S")),
+                audit_dict.get("category", "ADB"),
+                audit_dict.get("action", ""),
+                audit_dict.get("target", "Global"),
+                audit_dict.get("command", ""),
+                float(audit_dict.get("duration_sec", 0.0)),
+                int(audit_dict.get("return_code", 0)),
+                audit_dict.get("status", "SUCCESS"),
+                str(audit_dict.get("response", ""))[:4000],
+                str(audit_dict.get("error", ""))[:2000],
+                time.time()
+            ))
+
+    def get_recent_audits(self, limit: int = 200, category: str | None = None) -> list[dict[str, Any]]:
+        with self._lock, self._conn() as conn:
+            if category and category.upper() != "ALL":
+                cur = conn.execute(
+                    "SELECT * FROM audit_records WHERE category = ? ORDER BY created_at DESC LIMIT ?",
+                    (category.upper(), limit)
+                )
+            else:
+                cur = conn.execute(
+                    "SELECT * FROM audit_records ORDER BY created_at DESC LIMIT ?",
+                    (limit,)
+                )
+            rows = cur.fetchall()
+            return [dict(r) for r in reversed(rows)]
+
+    # ── MUTATION JOURNAL (REPLACES mutation_journal.json) ─────────────────────
+    def record_mutation(
+        self,
+        mutation_id: str,
+        serial: str,
+        action: str,
+        package_name: str,
+        undo_command: str,
+        label: str = "",
+        backup_dir: str = ""
+    ):
+        with self._lock, self._conn() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO mutation_journal
+                (id, timestamp, serial, action, package_name, undo_command, label, backup_dir, undone, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+            """, (
+                mutation_id,
+                time.strftime("%Y-%m-%d %H:%M:%S"),
+                serial,
+                action,
+                package_name,
+                undo_command,
+                label,
+                backup_dir,
+                time.time()
+            ))
+
+    def mark_mutation_undone(self, mutation_id: str):
+        with self._lock, self._conn() as conn:
+            conn.execute("UPDATE mutation_journal SET undone = 1 WHERE id = ?", (mutation_id,))
+
+    def get_mutations(self, serial: str | None = None, pending_only: bool = False) -> list[dict[str, Any]]:
+        with self._lock, self._conn() as conn:
+            query = "SELECT * FROM mutation_journal WHERE 1=1"
+            params: list[Any] = []
+            if serial:
+                query += " AND serial = ?"
+                params.append(serial)
+            if pending_only:
+                query += " AND undone = 0"
+            query += " ORDER BY created_at DESC LIMIT 300"
+            cur = conn.execute(query, params)
+            return [dict(r) for r in cur.fetchall()]
+
+    def import_legacy_journal_file(self, journal_file_path: str):
+        if not os.path.isfile(journal_file_path):
+            return
+        try:
+            with open(journal_file_path, encoding="utf-8") as f:
+                entries = json.load(f)
+            if isinstance(entries, list):
+                for e in entries:
+                    if isinstance(e, dict) and "id" in e:
+                        with self._lock, self._conn() as conn:
+                            conn.execute("""
+                                INSERT OR IGNORE INTO mutation_journal
+                                (id, timestamp, serial, action, package_name, undo_command, label, backup_dir, undone, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                e["id"],
+                                e.get("timestamp", time.strftime("%Y-%m-%d %H:%M:%S")),
+                                e.get("serial", ""),
+                                e.get("action", "mutation"),
+                                e.get("package_name", ""),
+                                e.get("undo_command", ""),
+                                e.get("label", ""),
+                                e.get("backup_dir", ""),
+                                1 if e.get("undone") else 0,
+                                e.get("created_at", time.time())
+                            ))
+        except Exception:
+            pass
+
+    # ── DEVICE & PACKAGE CACHE ────────────────────────────────────────────────
+    def save_device_telemetry(self, serial: str, model: str, version: str, build_id: str, battery: int, state: str, raw_info: dict | None = None):
+        raw_str = json.dumps(raw_info or {})
+        with self._lock, self._conn() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO device_cache
+                (serial, model, android_version, build_id, battery_level, state, raw_info, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (serial, model, version, build_id, battery, state, raw_str, time.time()))
+
+    def get_cached_devices(self) -> list[dict[str, Any]]:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("SELECT * FROM device_cache ORDER BY last_seen DESC")
+            return [dict(r) for r in cur.fetchall()]
+
+    def cache_packages(self, serial: str, packages: list[dict[str, Any]]):
+        now = time.time()
+        rows = [
+            (
+                serial,
+                p.get("package", ""),
+                p.get("label") or p.get("name", ""),
+                1 if p.get("system") else 0,
+                1 if p.get("disabled") else 0,
+                1 if p.get("uninstalled") else 0,
+                p.get("path", ""),
+                p.get("version", ""),
+                p.get("icon_path", ""),
+                now
+            )
+            for p in packages if p.get("package")
+        ]
+        with self._lock, self._conn() as conn:
+            conn.executemany("""
+                INSERT OR REPLACE INTO package_cache
+                (serial, package_name, label, is_system, is_disabled, is_uninstalled, apk_path, version_name, icon_path, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, rows)
+
+    def get_cached_packages(self, serial: str) -> list[dict[str, Any]]:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("SELECT * FROM package_cache WHERE serial = ? ORDER BY package_name ASC", (serial,))
+            results = []
+            for r in cur.fetchall():
+                results.append({
+                    "package": r["package_name"],
+                    "name": r["label"] or r["package_name"],
+                    "label": r["label"] or r["package_name"],
+                    "system": bool(r["is_system"]),
+                    "disabled": bool(r["is_disabled"]),
+                    "uninstalled": bool(r["is_uninstalled"]),
+                    "path": r["apk_path"],
+                    "version": r["version_name"],
+                    "icon_path": r["icon_path"]
+                })
+            return results
+
+    # ── DEBLOAT RULES ENGINE ──────────────────────────────────────────────────
+    def import_debloat_profiles(self, profiles: list[dict[str, Any]]):
+        now = time.time()
+        rows = [
+            (
+                p.get("package", ""),
+                p.get("label", ""),
+                p.get("category", "Third-Party"),
+                p.get("risk_level", "SAFE"),
+                p.get("description", ""),
+                p.get("recommendation", "Removal optional"),
+                now
+            )
+            for p in profiles if p.get("package")
+        ]
+        with self._lock, self._conn() as conn:
+            conn.executemany("""
+                INSERT OR REPLACE INTO debloat_rules
+                (package_name, label, category, risk_level, description, recommendation, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, rows)
+
+    def get_debloat_rule(self, pkg: str) -> dict[str, Any] | None:
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("SELECT * FROM debloat_rules WHERE package_name = ?", (pkg,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+
+class SQLiteLogHandler(logging.Handler):
+    """Logging handler that routes records into SQLite in WAL mode."""
+
+    def __init__(self, db: AppDatabase):
+        super().__init__()
+        self.db = db
+
+    def emit(self, record: logging.LogRecord):
+        try:
+            msg = record.getMessage()
+            self.db.log_message(record.levelname, record.name, msg)
+        except Exception:
+            self.handleError(record)
+
+
+# Global singleton instance
+
+APP_DB = AppDatabase(DB_PATH)
+LOGGER.addHandler(SQLiteLogHandler(APP_DB))
 
 LOGGER.info("ADB AppControl initialized. Install dir: %s | Data dir: %s", BASE_DIR, DATA_DIR)
 if LAYOUT_REPORT.get("migrated") or LAYOUT_REPORT.get("created"):
@@ -14471,6 +14884,1199 @@ def run_device_verification(write_artifacts: bool = False) -> int:
     return 0 if passed == len(results) else 1
 
 
+
+# ── EMBEDDED WEB ASSETS & STANDALONE FASTAPI WEBUI SERVER ───────────────────
+EMBEDDED_INDEX_HTML_GZ_B64 = "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"
+EMBEDDED_STYLE_CSS_GZ_B64 = "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"
+
+def get_embedded_index_html() -> str:
+    disk_path = os.path.join(BASE_DIR, "web", "index.html")
+    if os.path.isfile(disk_path):
+        try:
+            with open(disk_path, encoding="utf-8") as f:
+                return f.read()
+        except Exception:
+            pass
+    return gzip.decompress(base64.b64decode(EMBEDDED_INDEX_HTML_GZ_B64)).decode("utf-8")
+
+def get_embedded_style_css() -> str:
+    disk_path = os.path.join(BASE_DIR, "web", "style.css")
+    if os.path.isfile(disk_path):
+        try:
+            with open(disk_path, encoding="utf-8") as f:
+                return f.read()
+        except Exception:
+            pass
+    return gzip.decompress(base64.b64decode(EMBEDDED_STYLE_CSS_GZ_B64)).decode("utf-8")
+
+def ensure_web_assets():
+    web_dir = os.path.join(BASE_DIR, "web")
+    os.makedirs(web_dir, exist_ok=True)
+    html_file = os.path.join(web_dir, "index.html")
+    if not os.path.isfile(html_file):
+        try:
+            with open(html_file, "w", encoding="utf-8") as f:
+                f.write(get_embedded_index_html())
+        except Exception:
+            pass
+    css_file = os.path.join(web_dir, "style.css")
+    if not os.path.isfile(css_file):
+        try:
+            with open(css_file, "w", encoding="utf-8") as f:
+                f.write(get_embedded_style_css())
+        except Exception:
+            pass
+
+import asyncio
+import webbrowser
+try:
+    from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import FileResponse, HTMLResponse, Response
+except ImportError:
+    FastAPI = Any  # type: ignore
+    WebSocket = Any  # type: ignore
+    WebSocketDisconnect = Exception  # type: ignore
+    FileResponse = Any  # type: ignore
+    HTMLResponse = Any  # type: ignore
+    Response = Any  # type: ignore
+    File = Any  # type: ignore
+    UploadFile = Any  # type: ignore
+    HTTPException = Exception  # type: ignore
+    CORSMiddleware = Any  # type: ignore
+
+def _device_to_dict(d: Any) -> dict[str, Any]:
+    if d is None:
+        return {}
+    if hasattr(d, "to_dict"):
+        try:
+            return d.to_dict()
+        except Exception:
+            pass
+    return {
+        "serial": getattr(d, "serial", ""),
+        "state": getattr(d, "state", "device"),
+        "transport_mode": getattr(d, "transport_mode", "adb"),
+        "device_model": getattr(d, "device_model", "Android Device"),
+        "name": getattr(d, "name", ""),
+        "android_version": getattr(d, "android_version", "Unknown"),
+        "battery_level": getattr(d, "battery_level", None),
+        "battery_status": getattr(d, "battery_status", ""),
+        "battery_display": getattr(d, "get_battery_status", lambda: "")() if hasattr(d, "get_battery_status") else "",
+        "specs": getattr(d, "specs", {}),
+    }
+
+
+def create_app(store_provider=None) -> FastAPI:
+    # ── WEBSOCKET CLIENT MANAGER (REAL-TIME STREAMING) ────────────────────────
+    class ConnectionManager:
+        def __init__(self):
+            self.active_connections: list[WebSocket] = []
+            self._lock = asyncio.Lock()
+
+        async def connect(self, websocket: WebSocket):
+            await websocket.accept()
+            async with self._lock:
+                self.active_connections.append(websocket)
+
+        async def disconnect(self, websocket: WebSocket):
+            async with self._lock:
+                if websocket in self.active_connections:
+                    self.active_connections.remove(websocket)
+
+        async def broadcast(self, message: dict[str, Any]):
+            async with self._lock:
+                to_remove = []
+                for connection in self.active_connections:
+                    try:
+                        await connection.send_text(json.dumps(message))
+                    except Exception:
+                        to_remove.append(connection)
+                for conn in to_remove:
+                    if conn in self.active_connections:
+                        self.active_connections.remove(conn)
+
+    manager = ConnectionManager()
+    loop_holder: dict[str, Any] = {"loop": None}
+
+    def _get_store():
+        if callable(store_provider):
+            return store_provider()
+        return store_provider
+
+    def _broadcast_sync(msg_type: str, data: Any):
+        loop = loop_holder.get("loop")
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                manager.broadcast({"type": msg_type, "data": data, "timestamp": time.strftime("%H:%M:%S")}),
+                loop
+            )
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app: FastAPI):
+        loop_holder["loop"] = asyncio.get_running_loop()
+        store = _get_store()
+        if store and hasattr(store, "adb_engine"):
+            # Hook audit logger to broadcast to browser
+            def _on_audit(rec):
+                _broadcast_sync("audit", rec.to_dict())
+                APP_DB.record_audit(rec.to_dict())
+
+            from appcontrol import AUDIT_LOGGER
+            AUDIT_LOGGER.subscribe(_on_audit)
+
+            # SQLite log handler hook
+            class WsLogHandler(logging.Handler):
+                def emit(self, record):
+                    try:
+                        msg = record.getMessage()
+                        APP_DB.log_message(record.levelname, record.name, msg)
+                        _broadcast_sync("log", {
+                            "level": record.levelname,
+                            "logger": record.name,
+                            "message": msg,
+                            "time": time.strftime("%H:%M:%S")
+                        })
+                    except Exception:
+                        pass
+            ws_h = WsLogHandler()
+            ws_h.setLevel(logging.INFO)
+            LOGGER.addHandler(ws_h)
+        yield
+
+    app = FastAPI(title="ADB AppControl Modern WebUI", version="3.0.0", lifespan=lifespan)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @app.websocket("/ws/live")
+    async def websocket_endpoint(websocket: WebSocket):
+        await manager.connect(websocket)
+        # Send initial recent logs and device status on connect
+        try:
+            recent_logs = APP_DB.get_recent_logs(80)
+            recent_audits = APP_DB.get_recent_audits(50)
+            await websocket.send_text(json.dumps({
+                "type": "init",
+                "logs": recent_logs,
+                "audits": recent_audits,
+                "timestamp": time.strftime("%H:%M:%S")
+            }))
+            while True:
+                data = await websocket.receive_text()
+                # Heartbeat or client ping
+                if data == "ping":
+                    await websocket.send_text(json.dumps({"type": "pong"}))
+        except WebSocketDisconnect:
+            await manager.disconnect(websocket)
+        except Exception:
+            await manager.disconnect(websocket)
+
+    # ── SYSTEM & STATUS APIS ──────────────────────────────────────────────────
+    @app.get("/api/status")
+    def get_status():
+        store = _get_store()
+        if not store:
+            return {"error": "Store not initialized"}
+        cur = store.get_current_device()
+        devs = store.get_device_list()
+        brain = getattr(store, "brain_engine", None)
+        return {
+            "connected_devices_count": len(devs),
+            "current_device": _device_to_dict(cur) if cur else None,
+            "acbridge_ready": store.is_acbridge_ready(),
+            "ai_model_ready": getattr(brain, "is_ready", False) if brain else False,
+            "ai_status": getattr(brain, "status_msg", "Offline") if brain else "Offline",
+            "server_time": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+    @app.get("/api/devices")
+    def list_devices():
+        store = _get_store()
+        devs = store.get_device_list()
+        cur = store.get_current_device()
+        return {
+            "devices": [_device_to_dict(d) for d in devs],
+            "active_serial": cur.serial if cur else ""
+        }
+
+    @app.post("/api/devices/select")
+    def select_device(payload: dict[str, str]):
+        serial = payload.get("serial", "").strip()
+        store = _get_store()
+        devs = store.get_device_list()
+        for d in devs:
+            if d.serial == serial:
+                store.set_current_device(d)
+                # Refresh apps for device
+                apps = store.adb_engine.list_all_packages()
+                store.update_app_data(apps)
+                APP_DB.cache_packages(serial, apps)
+                _broadcast_sync("device_changed", {"serial": serial, "model": d.device_model})
+                return {"success": True, "device": _device_to_dict(d)}
+        return {"success": False, "error": f"Device {serial} not found"}
+
+    @app.post("/api/devices/scan")
+    def trigger_scan():
+        store = _get_store()
+        devs = store.adb_engine.scan_devices(include_fastboot=True)
+        cur = store.adb_engine.current_device
+        apps = store.adb_engine.list_all_packages() if (cur and cur.state == "device") else []
+        is_bridge = store.adb_engine.is_acbridge_installed() if (cur and cur.state == "device") else False
+        store.batch_update_scan_results(devs, apps, is_bridge)
+        if cur:
+            APP_DB.cache_packages(cur.serial, apps)
+        _broadcast_sync("scan_complete", {"devices": [_device_to_dict(d) for d in devs], "app_count": len(apps)})
+        return {"success": True, "device_count": len(devs), "app_count": len(apps)}
+
+    @app.post("/api/devices/reboot")
+    def reboot_device(payload: dict[str, str]):
+        target = payload.get("target", "system").lower()
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if target == "recovery":
+            ok, out, err = engine.run_adb(["reboot", "recovery"], target_serial=serial)
+        elif target == "bootloader":
+            ok, out, err = engine.run_adb(["reboot", "bootloader"], target_serial=serial)
+        elif target == "edl":
+            ok, out, err = engine.run_adb(["reboot", "edl"], target_serial=serial)
+        elif target == "fastboot":
+            ok, out, err = engine.run_adb(["reboot", "fastboot"], target_serial=serial)
+        else:
+            ok, out, err = engine.run_adb(["reboot"], target_serial=serial)
+        return {"success": ok, "message": (out or err).strip() or f"Reboot to {target} executed."}
+
+    @app.post("/api/devices/wireless/connect")
+    def connect_wireless(payload: dict[str, str]):
+        address = payload.get("address", "").strip()
+        if not address:
+            raise HTTPException(status_code=400, detail="Address required (e.g. 192.168.1.100:5555)")
+        store = _get_store()
+        ok, out, err = store.adb_engine.run_adb(["connect", address], timeout=15)
+        # Save to history
+        hist = APP_DB.get_config("wireless_history", [])
+        if address not in hist:
+            hist.append(address)
+            APP_DB.set_config("wireless_history", hist[-10:])
+        return {"success": ok, "message": (out or err).strip()}
+
+    @app.post("/api/devices/wireless/pair")
+    def pair_wireless(payload: dict[str, str]):
+        address = payload.get("address", "").strip()
+        code = payload.get("code", "").strip()
+        if not address or not code:
+            raise HTTPException(status_code=400, detail="Address and pairing code required")
+        store = _get_store()
+        ok, out, err = store.adb_engine.run_adb(["pair", address, code], timeout=20)
+        return {"success": ok, "message": (out or err).strip()}
+
+    @app.get("/api/devices/specs")
+    def get_specs():
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if hasattr(engine, "get_device_specs"):
+            specs = engine.get_device_specs(serial=serial)
+        else:
+            specs = {}
+        return {"specs": specs, "serial": serial}
+
+    @app.post("/api/devices/mtp")
+    def open_mtp():
+        store = _get_store()
+        engine = store.adb_engine
+        msg = engine.open_native_mtp_explorer() if hasattr(engine, "open_native_mtp_explorer") else "MTP not supported"
+        return {"success": True, "message": msg}
+
+    @app.post("/api/devices/devmode")
+    def enable_devmode():
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        msg = engine.enable_developer_mode(serial=serial) if hasattr(engine, "enable_developer_mode") else "Developer mode not supported"
+        return {"success": True, "message": msg}
+
+    @app.post("/api/devices/disconnect")
+    def disconnect_device():
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if ":" in serial:
+            engine.run_adb(["disconnect", serial])
+        store.set_current_device(None)
+        return {"success": True, "message": f"Disconnected {serial}"}
+
+    @app.post("/api/devices/acbridge/install")
+    def install_acbridge():
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        msg = engine.install_acbridge(serial=serial) if hasattr(engine, "install_acbridge") else "AC Bridge install not supported"
+        return {"success": "successfully" in msg.lower(), "message": msg}
+
+    # ── APPLICATION MANAGEMENT APIS ───────────────────────────────────────────
+    @app.get("/api/apps")
+    def get_applications(search: str = "", filter_type: str = "all", sort_by: str = "name"):
+        store = _get_store()
+        cur = store.get_current_device()
+        if not cur or cur.state != "device":
+            return {"apps": [], "stats": {"total": 0, "user": 0, "system": 0, "disabled": 0, "uninstalled": 0}}
+
+        all_apps = store.get_all_apps()
+        if not all_apps:
+            # Check SQLite package cache first for instant response
+            cached = APP_DB.get_cached_packages(cur.serial)
+            if cached:
+                all_apps = cached
+                store.update_app_data(cached)
+            else:
+                all_apps = store.adb_engine.list_all_packages()
+                store.update_app_data(all_apps)
+                APP_DB.cache_packages(cur.serial, all_apps)
+
+        stats = {
+            "total": len(all_apps),
+            "user": sum(1 for a in all_apps if not a.get("system")),
+            "system": sum(1 for a in all_apps if a.get("system")),
+            "disabled": sum(1 for a in all_apps if a.get("disabled")),
+            "uninstalled": sum(1 for a in all_apps if a.get("uninstalled")),
+        }
+
+        # Filter
+        res = []
+        q = search.lower().strip()
+        for a in all_apps:
+            pkg = a.get("package", "")
+            name = a.get("name", "") or a.get("label", "") or pkg
+            if q and (q not in pkg.lower() and q not in name.lower()):
+                continue
+            if filter_type == "user" and a.get("system"):
+                continue
+            if filter_type == "system" and not a.get("system"):
+                continue
+            if filter_type == "disabled" and not a.get("disabled"):
+                continue
+            if filter_type == "uninstalled" and not a.get("uninstalled"):
+                continue
+            res.append(a)
+
+        # Sort
+        if sort_by == "package":
+            res.sort(key=lambda x: x.get("package", "").lower())
+        else:
+            res.sort(key=lambda x: (x.get("name") or x.get("package", "")).lower())
+
+        return {"apps": res, "stats": stats}
+
+    @app.post("/api/apps/action")
+    def perform_app_action(payload: dict[str, Any]):
+        action = payload.get("action", "").lower().strip()
+        packages = payload.get("packages", [])
+        backup = payload.get("backup", True)
+        user_zero = payload.get("user_zero", True)
+
+        if not packages or not action:
+            raise HTTPException(status_code=400, detail="Action and packages list required")
+
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+
+        results = []
+        for pkg in packages:
+            msg = ""
+            ok = False
+            if action == "uninstall":
+                if backup:
+                    engine.backup_apk(pkg, serial=serial)
+                res = engine.uninstall_app(pkg, keep_data=False, user_zero=user_zero, serial=serial)
+                ok = getattr(res, "ok", True)
+                msg = str(res)
+                if ok:
+                    APP_DB.record_mutation(f"uninst_{int(time.time()*1000)}", serial, "uninstall", pkg, f"pm install-existing {pkg}", f"Uninstall {pkg}")
+            elif action == "disable":
+                res = engine.disable_app(pkg, serial=serial)
+                ok = getattr(res, "ok", True)
+                msg = str(res)
+                if ok:
+                    APP_DB.record_mutation(f"dis_{int(time.time()*1000)}", serial, "disable", pkg, f"pm enable {pkg}", f"Disable {pkg}")
+            elif action == "enable":
+                res = engine.enable_app(pkg, serial=serial)
+                ok = getattr(res, "ok", True)
+                msg = str(res)
+            elif action == "clear":
+                res = engine.clear_app_data(pkg, serial=serial)
+                ok = getattr(res, "ok", True)
+                msg = str(res)
+            elif action == "backup":
+                ok, msg = engine.backup_apk(pkg, serial=serial)
+            elif action == "restore":
+                res = engine.restore_uninstalled_app(pkg, serial=serial)
+                ok = getattr(res, "ok", True)
+                msg = str(res)
+            elif action == "auto-permissions":
+                g, tot = engine.auto_grant_all_permissions(pkg, serial=serial)
+                ok = (g > 0 or tot == 0)
+                msg = f"Granted {g}/{tot} permissions for {pkg}"
+            elif action == "launch":
+                ok, msg = engine.launch_app(pkg, serial=serial)
+            elif action == "stop":
+                ok, msg = engine.force_stop_app(pkg, serial=serial)
+            else:
+                msg = f"Unknown action '{action}'"
+            results.append({"package": pkg, "success": ok, "message": msg})
+
+        # Refresh package list in background
+        threading.Thread(target=lambda: store.update_app_data(engine.list_all_packages()), daemon=True).start()
+        return {"success": True, "results": results}
+
+    @app.post("/api/apps/upload_install")
+    async def upload_and_install_apk(
+        files: list[UploadFile] = File(...),
+        replace: bool = True,
+        grant_perms: bool = True,
+        downgrade: bool = False,
+        test_pkg: bool = False,
+    ):
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if not cur:
+            raise HTTPException(status_code=400, detail="No device connected")
+
+        upload_dir = os.path.join(DATA_DIR, "cache", "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+
+        saved_paths = []
+        for file in files:
+            file_path = os.path.join(upload_dir, file.filename)
+            content = await file.read()
+            with open(file_path, "wb") as f:
+                f.write(content)
+            saved_paths.append(file_path)
+
+        ok, msg = engine.install_apks(
+            saved_paths,
+            replace=replace,
+            downgrade=downgrade,
+            grant_perms=grant_perms,
+            test_pkg=test_pkg,
+            serial=serial,
+        )
+        return {"success": ok, "message": msg, "files": [f.filename for f in files]}
+
+    @app.get("/api/apps/details/{pkg}")
+    def get_app_details(pkg: str):
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        details = engine.get_package_details(pkg, serial=serial)
+        return {"package": pkg, "details": details}
+
+    @app.get("/api/apps/icon/{pkg}")
+    def get_app_icon(pkg: str):
+        icon_path = os.path.join(DATA_DIR, "cache", "icons", f"{pkg}.png")
+        if os.path.isfile(icon_path):
+            with open(icon_path, "rb") as f:
+                return Response(content=f.read(), media_type="image/png")
+        # Return generated SVG badge for zero network or disk overhead
+        color_palette = ["#1E88E5", "#43A047", "#E53935", "#8E24AA", "#FB8C00", "#00ACC1", "#3949AB"]
+        h = sum(ord(c) for c in pkg)
+        color = color_palette[h % len(color_palette)]
+        char = (pkg.split(".")[-1][0] if "." in pkg else pkg[0]).upper()
+        svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+            <rect width="40" height="40" rx="10" fill="{color}"/>
+            <text x="20" y="26" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="bold" fill="white" text-anchor="middle">{char}</text>
+        </svg>"""
+        return Response(content=svg, media_type="image/svg+xml")
+
+    # ── DEBLOAT WIZARD & PRESETS APIS ─────────────────────────────────────────
+    @app.get("/api/debloat/presets")
+    def get_debloat_presets():
+        presets = [
+            {"id": "safe", "name": "Recommended Safe Debloat", "description": "Safe telemetry & bloat removal"},
+            {"id": "samsung", "name": "Samsung One UI Bloatware", "description": "Samsung Bixby, AR zone, and telemetry"},
+            {"id": "xiaomi", "name": "Xiaomi / MIUI / HyperOS", "description": "Xiaomi Analytics, Mi Pay, and ads"},
+            {"id": "google", "name": "Google Services & Telemetry", "description": "Google tracking and optional apps"},
+            {"id": "carrier", "name": "Carrier Bloatware", "description": "Verizon, AT&T, T-Mobile carrier apps"}
+        ]
+        return {"presets": presets}
+
+    @app.post("/api/debloat/apply")
+    def apply_debloat(payload: dict[str, Any]):
+        packages = payload.get("packages", [])
+        action = payload.get("action", "disable")  # disable | uninstall
+        backup = payload.get("backup", True)
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+
+        results = []
+        for pkg in packages:
+            if action == "uninstall":
+                if backup:
+                    engine.backup_apk(pkg, serial=serial)
+                res = engine.uninstall_app(pkg, keep_data=False, serial=serial)
+            else:
+                res = engine.disable_app(pkg, serial=serial)
+            results.append({"package": pkg, "success": getattr(res, "ok", True), "message": str(res)})
+        return {"success": True, "results": results}
+
+    # ── PROCESS MANAGER APIS ──────────────────────────────────────────────────
+    @app.get("/api/processes")
+    def list_processes():
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if hasattr(engine, "get_process_list"):
+            raw_procs = engine.get_process_list(serial=serial)
+        elif hasattr(engine, "list_running_processes"):
+            raw_procs = engine.list_running_processes(serial=serial)
+        else:
+            raw_procs = []
+        procs = []
+        for p in raw_procs:
+            procs.append({
+                "pid": p.get("pid", ""),
+                "user": p.get("user", ""),
+                "cpu": p.get("cpu", "0.0"),
+                "ram": f"{p.get('ram_mb', 0)} MB" if "ram_mb" in p else p.get("ram", "0 MB"),
+                "name": p.get("name", ""),
+            })
+        return {"processes": procs, "count": len(procs)}
+
+    @app.post("/api/processes/kill")
+    def kill_process(payload: dict[str, Any]):
+        pid = payload.get("pid")
+        pkg = payload.get("package", "")
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if pid:
+            ok, out, err = engine.run_shell(f"kill -9 {pid}", target_serial=serial)
+        elif pkg:
+            ok, out = engine.force_stop_app(pkg, serial=serial)
+            err = ""
+        else:
+            raise HTTPException(status_code=400, detail="PID or package required")
+        return {"success": ok, "message": (out or err).strip() or "Process terminated."}
+
+    @app.post("/api/processes/trim")
+    def trim_ram():
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        ok, msg = engine.trim_memory(serial=serial)
+        return {"success": ok, "message": msg}
+
+    # ── PERMISSIONS APIS ──────────────────────────────────────────────────────
+    @app.get("/api/permissions/list")
+    def get_supported_permissions():
+        perms_dict = {
+            "📷 Camera": "android.permission.CAMERA",
+            "🎤 Microphone": "android.permission.RECORD_AUDIO",
+            "📍 Location (Fine)": "android.permission.ACCESS_FINE_LOCATION",
+            "📍 Location (Coarse)": "android.permission.ACCESS_COARSE_LOCATION",
+            "📞 Phone State": "android.permission.READ_PHONE_STATE",
+            "👥 Contacts (Read)": "android.permission.READ_CONTACTS",
+            "👥 Contacts (Write)": "android.permission.WRITE_CONTACTS",
+            "📅 Calendar": "android.permission.READ_CALENDAR",
+            "📁 Storage (Read)": "android.permission.READ_EXTERNAL_STORAGE",
+            "📁 Storage (Write)": "android.permission.WRITE_EXTERNAL_STORAGE",
+            "📁 All Files Access": "android.permission.MANAGE_EXTERNAL_STORAGE",
+            "💬 SMS Messages": "android.permission.READ_SMS",
+            "📞 Call Log": "android.permission.READ_CALL_LOG",
+            "🖼 Media & Photos": "android.permission.READ_MEDIA_IMAGES",
+            "🎬 Media Video": "android.permission.READ_MEDIA_VIDEO",
+            "🔔 Notifications": "android.permission.POST_NOTIFICATIONS",
+            "📡 Nearby Bluetooth": "android.permission.BLUETOOTH_CONNECT",
+            "🪟 Draw Over Apps": "android.permission.SYSTEM_ALERT_WINDOW",
+            "⚙️ Modify Settings": "android.permission.WRITE_SETTINGS",
+            "📊 Usage Stats Access": "android.permission.PACKAGE_USAGE_STATS",
+            "🔋 Battery Unrestricted": "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+            "🗺️ Background Location": "android.permission.ACCESS_BACKGROUND_LOCATION",
+            "🔢 Phone Numbers": "android.permission.READ_PHONE_NUMBERS",
+        }
+        return {"permissions": perms_dict}
+
+    @app.get("/api/permissions/scan")
+    def scan_permission(perm: str = "android.permission.CAMERA"):
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if hasattr(engine, "scan_all_permissions_for"):
+            data = engine.scan_all_permissions_for(perm, serial=serial)
+        else:
+            data = {"granted": [], "revoked": []}
+        return {"permission": perm, "granted": data.get("granted", []), "revoked": data.get("revoked", [])}
+
+    @app.post("/api/permissions/batch")
+    def batch_permission_change(payload: dict[str, Any]):
+        action = payload.get("action", "grant")
+        perm = payload.get("permission", "")
+        packages = payload.get("packages", [])
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        results = []
+        for pkg in packages:
+            if action == "grant":
+                res = engine.grant_permission(pkg, perm, serial=serial)
+            else:
+                res = engine.revoke_permission(pkg, perm, serial=serial)
+            results.append({"package": pkg, "success": getattr(res, "ok", True), "message": str(res)})
+        return {"success": True, "results": results}
+
+    @app.get("/api/permissions")
+    def list_permissions():
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        perms = engine.scan_runtime_permissions(serial=serial) if hasattr(engine, "scan_runtime_permissions") else []
+        return {"permissions": perms}
+
+    @app.post("/api/permissions/set")
+    def set_permission(payload: dict[str, Any]):
+        pkg = payload.get("package", "").strip()
+        perm = payload.get("permission", "").strip()
+        grant = payload.get("grant", True)
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if grant:
+            ok, msg = engine.grant_permission(pkg, perm, serial=serial)
+        else:
+            ok, msg = engine.revoke_permission(pkg, perm, serial=serial)
+        return {"success": ok, "message": msg}
+
+    # ── SCREEN MIRRORING & SCREENSHOT APIS ─────────────────────────────────────
+    @app.get("/api/screen/screenshot")
+    def capture_screenshot():
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        shot_path = os.path.join(DATA_DIR, "screenshots", "live_shot.png")
+        os.makedirs(os.path.dirname(shot_path), exist_ok=True)
+        ok = engine.take_screenshot(output_path=shot_path, serial=serial)
+        if not ok or not os.path.isfile(shot_path):
+            raise HTTPException(status_code=500, detail="Failed to capture screenshot from device.")
+        with open(shot_path, "rb") as f:
+            b64_img = base64.b64encode(f.read()).decode("utf-8")
+        return {"success": True, "image_base64": f"data:image/png;base64,{b64_img}"}
+
+    @app.post("/api/screen/scrcpy")
+    def launch_scrcpy(payload: dict[str, Any]):
+        max_size = payload.get("max_size", "")
+        bitrate = payload.get("bitrate", "")
+        fps = payload.get("fps", "")
+        turn_screen_off = payload.get("turn_screen_off", False)
+        stay_awake = payload.get("stay_awake", True)
+
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        ok, msg = engine.launch_scrcpy(
+            max_size=max_size,
+            bitrate=bitrate,
+            fps=fps,
+            turn_screen_off=turn_screen_off,
+            stay_awake=stay_awake,
+            serial=serial
+        )
+        return {"success": ok, "message": msg}
+
+    @app.post("/api/screen/tap")
+    def tap_screen(payload: dict[str, int]):
+        x = payload.get("x", 0)
+        y = payload.get("y", 0)
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        ok, out, err = store.adb_engine.run_shell(f"input tap {x} {y}", target_serial=serial)
+        return {"success": ok}
+
+    @app.post("/api/screen/swipe")
+    def handle_screen_swipe(payload: dict[str, Any]):
+        x1 = payload.get("x1", 540)
+        y1 = payload.get("y1", 1200)
+        x2 = payload.get("x2", 540)
+        y2 = payload.get("y2", 600)
+        duration_ms = payload.get("duration", 250)
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        ok, out, err = store.adb_engine.run_shell(
+            f"input swipe {x1} {y1} {x2} {y2} {duration_ms}",
+            target_serial=serial
+        )
+        return {"success": ok, "message": (out or err).strip()}
+
+    @app.post("/api/screen/key")
+    def send_keycode(payload: dict[str, Any]):
+        key = payload.get("key", 3)
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        ok, out, err = store.adb_engine.run_shell(f"input keyevent {key}", target_serial=serial)
+        return {"success": ok}
+
+    @app.post("/api/screen/text")
+    def send_device_text(payload: dict[str, str]):
+        text = payload.get("text", "")
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        msg = store.adb_engine.send_text(text, serial=serial) if hasattr(store.adb_engine, "send_text") else ""
+        return {"success": True, "message": msg}
+
+    @app.post("/api/screen/scale")
+    def set_screen_scale(payload: dict[str, Any]):
+        res = payload.get("resolution", "").strip()
+        dpi = payload.get("density", "").strip()
+        reset = payload.get("reset", False)
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if reset:
+            store.adb_engine.set_display_size("", serial=serial)
+            store.adb_engine.set_display_density("", serial=serial)
+            return {"success": True, "message": "Display scaling reset to default"}
+        if res:
+            store.adb_engine.set_display_size(res, serial=serial)
+        if dpi:
+            store.adb_engine.set_display_density(dpi, serial=serial)
+        return {"success": True, "message": f"Applied resolution={res} dpi={dpi}"}
+
+    @app.get("/api/screen/clipboard")
+    def get_clipboard():
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        txt = store.adb_engine.get_clipboard(serial=serial) if hasattr(store.adb_engine, "get_clipboard") else ""
+        return {"clipboard": txt}
+
+    @app.post("/api/screen/clipboard")
+    def set_clipboard(payload: dict[str, str]):
+        txt = payload.get("text", "")
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        msg = store.adb_engine.set_clipboard(txt, serial=serial) if hasattr(store.adb_engine, "set_clipboard") else ""
+        return {"success": True, "message": msg}
+
+    @app.post("/api/screen/record")
+    def record_screen(payload: dict[str, Any]):
+        sec = int(payload.get("seconds", 15))
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        dest_dir = store.adb_engine.get_device_dir("video", serial) if hasattr(store.adb_engine, "get_device_dir") else os.path.join(DATA_DIR, "video")
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, f"record_{int(time.time())}.mp4")
+        msg = store.adb_engine.start_screen_record(sec, dest, serial=serial) if hasattr(store.adb_engine, "start_screen_record") else ""
+        return {"success": True, "message": msg, "saved_path": dest}
+
+    # ── REMOTE FILE EXPLORER APIS ──
+
+    # ── FILE EXPLORER & INSTALL APIS ──────────────────────────────────────────
+    @app.get("/api/files/list")
+    def list_files(path: str = "/sdcard/"):
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        files = engine.list_files(path, serial=serial)
+        return {"path": path, "files": files}
+
+    @app.post("/api/files/pull")
+    def pull_file(payload: dict[str, str]):
+        remote_path = payload.get("remote_path", "").strip()
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        dest_dir = os.path.join(DATA_DIR, "downloads")
+        os.makedirs(dest_dir, exist_ok=True)
+        dest_file = os.path.join(dest_dir, os.path.basename(remote_path))
+        ok, msg = engine.pull_file(remote_path, dest_file, serial=serial)
+        return {"success": ok, "message": msg, "saved_path": dest_file if ok else ""}
+
+    @app.post("/api/files/push")
+    def push_file(payload: dict[str, str]):
+        local_path = payload.get("local_path", "").strip()
+        remote_path = payload.get("remote_path", "/sdcard/").strip()
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        ok, msg = engine.push_file(local_path, remote_path, serial=serial)
+        return {"success": ok, "message": msg}
+
+    @app.post("/api/files/mkdir")
+    def make_directory(payload: dict[str, str]):
+        path = payload.get("path", "").strip()
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        ok, out, err = store.adb_engine.run_shell(f"mkdir -p {shlex.quote(path)}", target_serial=serial)
+        return {"success": ok, "message": (out or err).strip()}
+
+    @app.post("/api/files/delete")
+    def delete_file(payload: dict[str, str]):
+        path = payload.get("path", "").strip()
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        ok, msg = store.adb_engine.delete_remote(path, serial=serial) if hasattr(store.adb_engine, "delete_remote") else (False, "Not supported")
+        return {"success": ok, "message": msg}
+
+    @app.get("/api/rescue/logcat")
+    def get_logcat(lines: int = 200, filter: str = ""):
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        cmd = f"logcat -d -t {lines}"
+        ok, out, err = store.adb_engine.run_shell(cmd, target_serial=serial)
+        raw_lines = out.splitlines() if ok else []
+        if filter:
+            raw_lines = [l for l in raw_lines if filter.lower() in l.lower()]
+        return {"lines": raw_lines[-lines:], "count": len(raw_lines)}
+
+    @app.post("/api/rescue/logcat/clear")
+    def clear_logcat():
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        msg = store.adb_engine.clear_logcat(serial=serial) if hasattr(store.adb_engine, "clear_logcat") else ""
+        return {"success": True, "message": msg}
+
+    @app.post("/api/rescue/bootloop_fix")
+    def run_bootloop_fix(payload: dict[str, str]):
+        fix_type = payload.get("fix_type", "safemode")
+        store = _get_store()
+        if hasattr(store.adb_engine, "bootloop_catch_and_fix"):
+            res = store.adb_engine.bootloop_catch_and_fix(fix_type, timeout_sec=20)
+        else:
+            res = "Bootloop fixer not supported on this engine."
+        return {"success": True, "message": res}
+
+    @app.post("/api/rescue/root_action")
+    def run_root_action(payload: dict[str, str]):
+        action = payload.get("action", "diagnostic")
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if action == "diagnostic":
+            status = store.adb_engine.get_root_status(serial=serial) if hasattr(store.adb_engine, "get_root_status") else "Unknown"
+            return {"success": True, "message": f"Root Status: {status}"}
+        elif action == "magisk":
+            ok, msg = store.adb_engine.install_magisk_app(serial=serial) if hasattr(store.adb_engine, "install_magisk_app") else (False, "Not supported")
+            return {"success": ok, "message": msg}
+        elif action == "one_click_root":
+            ok, msg = store.adb_engine.one_click_root(serial=serial) if hasattr(store.adb_engine, "one_click_root") else (False, "Not supported")
+            return {"success": ok, "message": msg}
+        return {"success": False, "message": f"Unknown root action: {action}"}
+
+    @app.post("/api/rescue/fastboot")
+    def run_fastboot_action(payload: dict[str, Any]):
+        action = payload.get("action", "getvar")
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if action == "getvar":
+            if hasattr(store.adb_engine, "get_fastboot_vars"):
+                try:
+                    vars_dict = store.adb_engine.get_fastboot_vars(serial=serial)
+                except TypeError:
+                    vars_dict = store.adb_engine.get_fastboot_vars()
+            else:
+                vars_dict = {}
+            return {"success": True, "vars": vars_dict}
+        elif action == "switch_slot":
+            slot = payload.get("slot", "a")
+            ok, msg = store.adb_engine.fastboot_switch_slot(slot, serial=serial) if hasattr(store.adb_engine, "fastboot_switch_slot") else (False, "Not supported")
+            return {"success": ok, "message": msg}
+        elif action == "reboot":
+            target = payload.get("target", "system")
+            ok, msg = store.adb_engine.fastboot_reboot_target(target, serial=serial) if hasattr(store.adb_engine, "fastboot_reboot_target") else (False, "Not supported")
+            return {"success": ok, "message": msg}
+        elif action == "wipe":
+            part = payload.get("partition", "cache")
+            ok, msg = store.adb_engine.fastboot_wipe_partition(part, serial=serial) if hasattr(store.adb_engine, "fastboot_wipe_partition") else (False, "Not supported")
+            return {"success": ok, "message": msg}
+        return {"success": False, "message": f"Unknown fastboot action: {action}"}
+
+    @app.post("/api/screen/dpad")
+    def send_dpad_key(payload: dict[str, str]):
+        dpad_map = {
+            "up": 19,
+            "down": 20,
+            "left": 21,
+            "right": 22,
+            "center": 23,
+            "menu": 82,
+            "camera": 27,
+            "back": 4,
+            "home": 3,
+            "recent": 187,
+            "power": 26,
+            "volup": 24,
+            "voldown": 25,
+        }
+        direction = payload.get("direction", "").lower()
+        key = dpad_map.get(direction)
+        if not key:
+            raise HTTPException(status_code=400, detail=f"Invalid direction: {direction}")
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        ok, out, err = store.adb_engine.run_shell(f"input keyevent {key}", target_serial=serial)
+        return {"success": ok, "key": key}
+
+    @app.post("/api/apps/launch")
+    def launch_app(payload: dict[str, str]):
+        pkg = payload.get("package", "").strip()
+        if not pkg:
+            raise HTTPException(status_code=400, detail="Package required")
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        cmd = f"monkey -p {shlex.quote(pkg)} -c android.intent.category.LAUNCHER 1"
+        ok, out, err = store.adb_engine.run_shell(cmd, target_serial=serial)
+        return {"success": ok, "message": out or err}
+
+    @app.post("/api/tools/open_folder")
+    def open_local_folder(payload: dict[str, str]):
+        folder_type = payload.get("type", "backups")
+        if folder_type == "backups":
+            folder_path = os.path.join(DATA_DIR, "backups")
+        elif folder_type == "logs":
+            folder_path = os.path.join(DATA_DIR, "logs")
+        elif folder_type == "models":
+            folder_path = os.path.join(DATA_DIR, "models")
+        else:
+            folder_path = DATA_DIR
+        os.makedirs(folder_path, exist_ok=True)
+        if sys.platform == "win32":
+            os.startfile(folder_path)
+        else:
+            import subprocess
+            subprocess.Popen(["xdg-open", folder_path])
+        return {"success": True, "path": folder_path}
+
+    @app.post("/api/tools/restart_adb")
+    def restart_adb():
+        store = _get_store()
+        ok, msg = store.adb_engine.restart_adb_server() if hasattr(store.adb_engine, "restart_adb_server") else (False, "Not supported")
+        return {"success": ok, "message": msg}
+
+    @app.get("/api/backups")
+    def list_backups():
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        backups = store.adb_engine.scan_all_device_backups(serial=serial) if hasattr(store.adb_engine, "scan_all_device_backups") else []
+        return {"backups": backups, "count": len(backups)}
+
+    @app.post("/api/backups/backup_all")
+    def backup_all_apks():
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        count = store.adb_engine.backup_all_user_apks(serial=serial) if hasattr(store.adb_engine, "backup_all_user_apks") else 0
+        return {"success": True, "count": count, "message": f"Successfully backed up {count} applications"}
+
+    # ── JOURNAL & UNDO APIS ───────────────────────────────────────────────────
+    @app.get("/api/journal")
+    def get_journal(pending_only: bool = False):
+        store = _get_store()
+        cur = store.get_current_device()
+        serial = cur.serial if cur else None
+        muts = APP_DB.get_mutations(serial=serial, pending_only=pending_only)
+        return {"mutations": muts}
+
+    @app.post("/api/journal/undo")
+    def undo_mutation(payload: dict[str, str]):
+        mutation_id = payload.get("mutation_id", "")
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        ok, msg = engine.undo_mutation(mutation_id, serial=serial)
+        if ok:
+            APP_DB.mark_mutation_undone(mutation_id)
+        return {"success": ok, "message": msg}
+
+    # ── TERMINAL QUICK COMMAND API ────────────────────────────────────────────
+    @app.post("/api/terminal/run")
+    def run_terminal_command(payload: dict[str, str]):
+        cmd = payload.get("command", "").strip()
+        if not cmd:
+            raise HTTPException(status_code=400, detail="Command required")
+        store = _get_store()
+        engine = store.adb_engine
+        cur = store.get_current_device()
+        serial = cur.serial if cur else ""
+        if cmd.startswith("adb "):
+            parts = shlex.split(cmd[4:])
+            ok, out, err = engine.run_adb(parts, target_serial=serial)
+        elif cmd.startswith("fastboot "):
+            parts = shlex.split(cmd[9:])
+            ok, out, err = engine.run_fastboot(parts, target_serial=serial)
+        else:
+            ok, out, err = engine.run_shell(cmd, target_serial=serial)
+        return {"success": ok, "stdout": out, "stderr": err}
+
+    # ── LOGS & AUDIT APIS ─────────────────────────────────────────────────────
+    @app.get("/api/logs")
+    def get_logs(limit: int = 150, level: str = "ALL"):
+        logs = APP_DB.get_recent_logs(limit=limit, level=level)
+        return {"logs": logs}
+
+    @app.post("/api/logs/clear")
+    def clear_logs():
+        APP_DB.clear_logs()
+        return {"success": True}
+
+    # ── LOCAL AI BRAIN COPILOT APIS ───────────────────────────────────────────
+    @app.get("/api/ai/status")
+    def get_ai_status():
+        store = _get_store()
+        brain = getattr(store, "brain_engine", None)
+        return {
+            "ready": getattr(brain, "is_ready", False) if brain else False,
+            "starting": getattr(brain, "is_starting", False) if brain else False,
+            "status": getattr(brain, "status_msg", "Offline") if brain else "Offline",
+            "model_path": getattr(brain, "model_path", "") if brain else "",
+        }
+
+    @app.post("/api/ai/toggle")
+    def toggle_ai():
+        store = _get_store()
+        brain = getattr(store, "brain_engine", None)
+        if not brain:
+            raise HTTPException(status_code=500, detail="AIBrainEngine not attached")
+        if brain.is_ready:
+            brain.stop_server()
+            return {"ready": False, "status": "Offline (RAM Freed)"}
+        else:
+            brain.start_server()
+            return {"ready": False, "status": "Starting Gemma 4B..."}
+
+    @app.post("/api/ai/chat")
+    def chat_ai(payload: dict[str, Any]):
+        message = payload.get("message", "").strip()
+        confirmed = payload.get("confirmed", True)
+        if not message:
+            raise HTTPException(status_code=400, detail="Message required")
+        store = _get_store()
+        brain = getattr(store, "brain_engine", None)
+        if not brain:
+            raise HTTPException(status_code=500, detail="AIBrainEngine not attached")
+        # Run turn with engine
+        resp, action = brain.execute_copilot_turn(
+            message,
+            store.adb_engine,
+            store,
+            confirm=(lambda p: bool(confirmed))
+        )
+        return {"response": resp, "action": action}
+
+    # ── SETTINGS APIS ─────────────────────────────────────────────────────────
+    @app.get("/api/settings")
+    def get_settings():
+        return {"settings": APP_DB.get_all_config()}
+
+    @app.post("/api/settings")
+    def update_settings(payload: dict[str, Any]):
+        for k, v in payload.items():
+            APP_DB.set_config(k, v)
+        return {"success": True}
+
+    # ── SINGLE-PAGE WEBUI FRONTEND (INDEX.HTML & ASSETS) ─────────────────────
+    @app.get("/style.css")
+    def serve_css():
+        css_file = os.path.join(BASE_DIR, "web", "style.css")
+        if os.path.isfile(css_file):
+            return FileResponse(css_file, media_type="text/css")
+        return Response(content=get_embedded_style_css(), media_type="text/css")
+
+    @app.get("/index.html", response_class=HTMLResponse)
+    @app.get("/", response_class=HTMLResponse)
+    def serve_frontend():
+        html_file = os.path.join(BASE_DIR, "web", "index.html")
+        if os.path.isfile(html_file):
+            with open(html_file, encoding="utf-8") as f:
+                return f.read()
+        return get_embedded_index_html()
+
+    web_dir = os.path.join(BASE_DIR, "web")
+    if os.path.isdir(web_dir):
+        from fastapi.staticfiles import StaticFiles
+        app.mount("/web", StaticFiles(directory=web_dir), name="web")
+        app.mount("/static", StaticFiles(directory=web_dir), name="static")
+
+    return app
+
+
+def run_web_server(store_provider=None, host: str = "127.0.0.1", port: int = 8080, open_browser: bool = True):
+    """Starts the FastAPI WebUI server using Uvicorn and automatically launches browser."""
+    import uvicorn
+
+    # Test port availability and find open port if 8080 is occupied
+    actual_port = port
+    import socket
+    for p in range(port, port + 20):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex((host, p)) != 0:
+                actual_port = p
+                break
+
+    app = create_app(store_provider)
+
+    url = f"http://{host}:{actual_port}"
+    LOGGER.info("ADB AppControl WebUI server starting at: %s", url)
+    print("\n=======================================================")
+    print("  ADB AppControl Universal Edition — Modern WebUI")
+    print(f"  URL: {url}")
+    print("  Press Ctrl+C to stop server")
+    print("=======================================================\n")
+
+    if open_browser:
+        def _open():
+            time.sleep(1.0)
+            webbrowser.open(url)
+        threading.Thread(target=_open, daemon=True).start()
+
+    config = uvicorn.Config(app=app, host=host, port=actual_port, log_level="warning", access_log=False)
+    server = uvicorn.Server(config)
+    server.run()
+
+
 # ── ENTRY POINT ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     if "--version" in sys.argv or "-v" in sys.argv:
@@ -14523,7 +16129,7 @@ if __name__ == "__main__":
     else:
         # Default ultra-fast modern WebUI architecture
         try:
-            from web_server import run_web_server
+            ensure_web_assets()
             port = 8080
             if "--port" in sys.argv:
                 try:
