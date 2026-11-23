@@ -948,17 +948,78 @@ footer {
 
 
 
-  </style>
+  
+/* ── UTILITY CLASSES FOR CLEAN HTML ZERO-INLINE-STYLES ── */
+.flex-row { display: flex; }
+.flex-col { display: flex; flex-direction: column; }
+.flex-1 { flex: 1; }
+.items-center { align-items: center; }
+.justify-center { justify-content: center; }
+.flex-wrap { flex-wrap: wrap; }
+.cursor-pointer { cursor: pointer; }
+
+.gap-4 { gap: 4px; }
+.gap-6 { gap: 6px; }
+.gap-8 { gap: 8px; }
+.gap-16 { gap: 16px; }
+
+.mt-4 { margin-top: 4px; }
+.mt-8 { margin-top: 8px; }
+.mt-10 { margin-top: 10px; }
+.mb-8 { margin-bottom: 8px; }
+.mb-14 { margin-bottom: 14px; }
+
+.text-blue { color: var(--accent-blue); }
+.text-amber { color: var(--accent-amber); }
+.text-purple { color: var(--accent-purple); }
+.text-red { color: var(--accent-red); }
+.text-teal { color: var(--accent-teal); }
+.text-green { color: var(--accent-green); }
+.text-muted { color: var(--text-muted); }
+.text-success { color: #10B981; }
+.text-cyan { color: #38BDF8; }
+.text-purple-accent { color: #A855F7; }
+.text-secondary { color: var(--text-secondary); }
+
+.stat-icon-blue { background: rgba(37,99,235,0.15); color: var(--accent-blue); }
+.stat-icon-green { background: rgba(5,150,105,0.15); color: var(--accent-green); }
+.stat-icon-amber { background: rgba(217,119,6,0.15); color: var(--accent-amber); }
+.stat-icon-purple { background: rgba(124,58,237,0.15); color: var(--accent-purple); }
+
+.font-bold { font-weight: 700; }
+.font-semibold { font-weight: 600; }
+.text-xs { font-size: 11px; }
+.text-sm { font-size: 12px; }
+.text-base { font-size: 12.5px; }
+.mono-prompt { color: #38BDF8; font-weight: bold; font-family: var(--font-mono); font-size: 13px; }
+
+.bg-subtle { background: var(--bg-card-subtle); }
+.d-none { display: none; }
+.text-center { text-align: center; }
+.w-70 { width: 70px; }
+.min-w-220 { min-width: 220px; }
+.chart-container-h { height: 110px; }
+.terminal-view-h { height: 440px; }
+.terminal-card-wrap { flex: 1; display: flex; flex-direction: column; padding: 0; overflow: hidden; background: var(--terminal-bg); }
+.screen-placeholder-text { color: var(--text-muted); padding: 40px; }
+.upload-status-indicator { margin-top: 8px; font-weight: bold; color: var(--accent-blue); }
+.install-flags-bar { padding: 10px 14px; background: var(--bg-card-subtle); display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+.input-subtle-wrap { display: flex; gap: 6px; padding: 8px 14px; background: var(--bg-card-subtle); border-top: 1px solid var(--border); overflow-x: auto; }
+.select-theme-box { border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px; max-width: 300px; }
+.section-divider { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+.section-divider-sm { border: none; border-top: 1px solid var(--border); margin: 6px 0; }
+
+</style>
 </head>
 <body>
 
   <!-- SERVER CONNECTIVITY NOTIFICATION BAR (FOR FILE:// PROTOCOL) -->
   <div id="server-banner" class="offline">
-    <div style="display:flex; align-items:center; gap:8px;">
+    <div class="flex-row items-center gap-8">
       <i class="fa-solid fa-triangle-exclamation"></i>
       <span id="banner-text">Connecting to ADB AppControl Engine (http://127.0.0.1:8080)...</span>
     </div>
-    <div style="display:flex; gap:8px;">
+    <div class="flex-row gap-8">
       <button class="btn btn-sm btn-primary" onclick="triggerScan()">🔄 Reconnect</button>
       <button class="btn btn-sm" onclick="document.getElementById('server-banner').style.display='none'">✖</button>
     </div>
@@ -974,7 +1035,7 @@ footer {
 
     <div class="header-center">
       <div class="device-picker-box">
-        <i class="fa-solid fa-mobile-screen" style="color:var(--accent-blue);"></i>
+        <i class="fa-solid fa-mobile-screen text-blue"></i>
         <select id="device-select" class="select-device" onchange="onSelectDevice()" title="Select Connected ADB Device" aria-label="Select Connected ADB Device">
           <option value="">Searching for devices...</option>
         </select>
@@ -1110,9 +1171,9 @@ footer {
         </div>
 
         <!-- Batch Action Toolbar (All actions from old app) -->
-        <div class="card toolbar" style="background:var(--bg-card-subtle);">
-          <div style="display:flex; align-items:center; gap:8px; font-weight:700; font-size:12.5px;">
-            <i class="fa-solid fa-layer-group" style="color:var(--accent-blue);"></i> Batch Actions:
+        <div class="card toolbar bg-subtle">
+          <div class="flex-row items-center gap-8 font-bold text-base">
+            <i class="fa-solid fa-layer-group text-blue"></i> Batch Actions:
           </div>
           <div class="toolbar-actions">
             <button class="btn btn-sm btn-danger" onclick="executeBatchAction('uninstall')"><i class="fa-solid fa-trash-can"></i> Uninstall</button>
@@ -1152,7 +1213,7 @@ footer {
       <div id="view-debloat" class="view-panel">
         <div class="card toolbar">
           <div>
-            <h3 class="view-header-title"><i class="fa-solid fa-broom" style="color:var(--accent-amber);"></i> Smart Debloat Wizard</h3>
+            <h3 class="view-header-title"><i class="fa-solid fa-broom text-amber"></i> Smart Debloat Wizard</h3>
             <p class="view-header-desc">Safe 1-click OEM bloatware removal, telemetry cleaner & battery optimization presets.</p>
           </div>
           <div class="toolbar-actions">
@@ -1166,9 +1227,9 @@ footer {
           </div>
         </div>
 
-        <div class="card toolbar" style="background:var(--bg-card-subtle);">
-          <div style="font-weight:700; font-size:12.5px;">Preset Selection Actions:</div>
-          <div style="display:flex; gap:8px;">
+        <div class="card toolbar bg-subtle">
+          <div class="font-bold text-base">Preset Selection Actions:</div>
+          <div class="flex-row gap-8">
             <button class="btn btn-sm btn-danger" onclick="applyDebloatSelection('disable')"><i class="fa-solid fa-pause"></i> Disable Selected</button>
             <button class="btn btn-sm btn-danger" onclick="applyDebloatSelection('uninstall')"><i class="fa-solid fa-trash-can"></i> Uninstall Selected</button>
             <button class="btn btn-sm btn-success" onclick="restoreDebloatSelection()"><i class="fa-solid fa-rotate-left"></i> Restore All Disabled</button>
@@ -1198,28 +1259,28 @@ footer {
         <!-- Hardware Metrics Cards -->
         <div class="telemetry-grid">
           <div class="stat-card">
-            <div class="stat-icon" style="background:rgba(37,99,235,0.15); color:var(--accent-blue);"><i class="fa-solid fa-memory"></i></div>
+            <div class="stat-icon stat-icon-blue"><i class="fa-solid fa-memory"></i></div>
             <div>
               <div id="stat-ram-val" class="stat-val">-- / -- GB</div>
               <div class="stat-lbl">RAM Total / Used</div>
             </div>
           </div>
           <div class="stat-card">
-            <div class="stat-icon" style="background:rgba(5,150,105,0.15); color:var(--accent-green);"><i class="fa-solid fa-battery-half"></i></div>
+            <div class="stat-icon stat-icon-green"><i class="fa-solid fa-battery-half"></i></div>
             <div>
               <div id="stat-battery-val" class="stat-val">--%</div>
               <div class="stat-lbl">Battery Level & Health</div>
             </div>
           </div>
           <div class="stat-card">
-            <div class="stat-icon" style="background:rgba(217,119,6,0.15); color:var(--accent-amber);"><i class="fa-solid fa-hard-drive"></i></div>
+            <div class="stat-icon stat-icon-amber"><i class="fa-solid fa-hard-drive"></i></div>
             <div>
               <div id="stat-storage-val" class="stat-val">-- GB Free</div>
               <div class="stat-lbl">Internal Storage</div>
             </div>
           </div>
           <div class="stat-card">
-            <div class="stat-icon" style="background:rgba(124,58,237,0.15); color:var(--accent-purple);"><i class="fa-solid fa-microchip"></i></div>
+            <div class="stat-icon stat-icon-purple"><i class="fa-solid fa-microchip"></i></div>
             <div>
               <div id="stat-cpu-val" class="stat-val">Live Active</div>
               <div class="stat-lbl">CPU & Process Telemetry</div>
@@ -1229,7 +1290,7 @@ footer {
 
         <div class="card toolbar">
           <div>
-            <h3 class="view-header-title"><i class="fa-solid fa-microchip" style="color:var(--accent-purple);"></i> Real-Time Process Monitor</h3>
+            <h3 class="view-header-title"><i class="fa-solid fa-microchip text-purple"></i> Real-Time Process Monitor</h3>
             <p class="view-header-desc">Inspect memory consumption, CPU load, and optimize background services.</p>
           </div>
           <div class="toolbar-actions">
@@ -1241,10 +1302,10 @@ footer {
         
         <div class="chart-card">
           <div class="chart-header">
-            <span><i class="fa-solid fa-chart-line" style="color:var(--accent-teal);"></i> Live Device Hardware Performance (RAM & CPU History)</span>
-            <span style="font-size:11px; color:var(--text-muted);">● <span style="color:#38BDF8;">RAM %</span>  ● <span style="color:#A855F7;">CPU %</span></span>
+            <span><i class="fa-solid fa-chart-line text-teal"></i> Live Device Hardware Performance (RAM & CPU History)</span>
+            <span class="text-xs text-muted">● <span class="text-cyan">RAM %</span>  ● <span class="text-purple-accent">CPU %</span></span>
           </div>
-          <div style="height:110px;">
+          <div class="chart-container-h">
             <canvas id="telemetryChart"></canvas>
           </div>
         </div>
@@ -1272,11 +1333,11 @@ footer {
       <div id="view-permissions" class="view-panel">
         <div class="card toolbar">
           <div>
-            <h3 class="view-header-title"><i class="fa-solid fa-shield-halved" style="color:var(--accent-teal);"></i> Bulk Permission & AppOps Auditor</h3>
+            <h3 class="view-header-title"><i class="fa-solid fa-shield-halved text-teal"></i> Bulk Permission & AppOps Auditor</h3>
             <p class="view-header-desc">Inspect and grant/revoke sensitive Android runtime hardware permissions.</p>
           </div>
           <div class="toolbar-actions">
-            <select id="perm-select" class="select-device" style="min-width:220px;" title="Select Android Permission to Scan" aria-label="Select Permission to Scan">
+            <select id="perm-select" class="select-device min-w-220" title="Select Android Permission to Scan" aria-label="Select Permission to Scan">
               <option value="android.permission.CAMERA">📷 Camera</option>
               <option value="android.permission.RECORD_AUDIO">🎤 Microphone</option>
               <option value="android.permission.ACCESS_FINE_LOCATION">📍 Location (Fine)</option>
@@ -1330,7 +1391,7 @@ footer {
           <!-- Smartphone Display Bezel Frame -->
           <div class="screen-preview-card">
             <div id="screen-preview-box" class="screen-preview-box" onmousedown="startScreenGesture(event)" onmouseup="endScreenGesture(event)" title="Click anywhere on screen to tap device">
-              <span id="screen-placeholder" style="color:var(--text-muted); padding:40px;">No screenshot captured yet.<br>Click 'Capture Screen' below.</span>
+              <span id="screen-placeholder" class="screen-placeholder-text">No screenshot captured yet.<br>Click 'Capture Screen' below.</span>
             </div>
             
             <div class="screen-controls">
@@ -1342,7 +1403,7 @@ footer {
             </div>
 
             <!-- Virtual Hardware Keycodes -->
-            <div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; justify-content:center;">
+            <div class="flex-row gap-6 mt-10 flex-wrap justify-center">
               <button class="btn btn-sm" onclick="sendKeycode(4)" title="Back Key (4)"><i class="fa-solid fa-chevron-left"></i> Back</button>
               <button class="btn btn-sm" onclick="sendKeycode(3)" title="Home Key (3)"><i class="fa-solid fa-house"></i> Home</button>
               <button class="btn btn-sm" onclick="sendKeycode(187)" title="App Switcher (187)"><i class="fa-solid fa-table-cells-large"></i> Recent</button>
@@ -1354,7 +1415,7 @@ footer {
             </div>
 
             <!-- Virtual D-Pad Controller -->
-            <div style="text-align:center; margin-top:10px;">
+            <div class="text-center mt-10">
               <div class="form-label mb-6">🎮 Virtual D-Pad Controller</div>
               <div class="dpad-container">
                 <div class="dpad-empty"></div>
@@ -1372,7 +1433,7 @@ footer {
 
           <!-- Remote Controls & Scrcpy Mirroring Panel -->
           <div class="card scrcpy-panel">
-            <h3 class="view-header-title"><i class="fa-solid fa-display" style="color:var(--accent-blue);"></i> Scrcpy Mirroring & Remote</h3>
+            <h3 class="view-header-title"><i class="fa-solid fa-display text-blue"></i> Scrcpy Mirroring & Remote</h3>
             <p class="view-header-desc">Zero-latency live display streaming and physical control.</p>
 
             <div>
@@ -1394,24 +1455,24 @@ footer {
               </select>
             </div>
 
-            <div style="display:flex; flex-direction:column; gap:6px;">
-              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <div class="flex-col gap-6">
+              <label class="flex-row items-center gap-8 cursor-pointer">
                 <input type="checkbox" id="scrcpy-stay-awake" checked title="Stay Awake while plugged in" aria-label="Stay Awake while plugged in"> Stay Awake while plugged in
               </label>
-              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <label class="flex-row items-center gap-8 cursor-pointer">
                 <input type="checkbox" id="scrcpy-turn-off" title="Turn Device Screen Off during mirroring" aria-label="Turn Device Screen Off"> Turn Device Screen Off
               </label>
             </div>
 
             <button class="btn btn-primary btn-block" onclick="launchScrcpy()"><i class="fa-solid fa-play"></i> Start Scrcpy Mirror</button>
 
-            <hr style="border:none; border-top:1px solid var(--border); margin:6px 0;">
+            <hr class="section-divider-sm">
 
             <!-- Send Text To Phone Input -->
             <div>
               <label class="form-label" for="phone-text-input">Type Text Directly to Phone:</label>
-              <div style="display:flex; gap:6px; margin-top:4px;">
-                <input type="text" id="phone-text-input" class="search-input" style="flex:1;" placeholder="Type text to send..." title="Text to Send to Device" aria-label="Text to Send to Device" onkeydown="if(event.key==='Enter') sendTextToPhone()">
+              <div class="flex-row gap-6 mt-4">
+                <input type="text" id="phone-text-input" class="search-input flex-1" placeholder="Type text to send..." title="Text to Send to Device" aria-label="Text to Send to Device" onkeydown="if(event.key==='Enter') sendTextToPhone()">
                 <button class="btn btn-sm btn-primary" onclick="sendTextToPhone()">Send</button>
               </div>
             </div>
@@ -1419,9 +1480,9 @@ footer {
             <!-- Display Scaling (wm size & wm density) -->
             <div>
               <label class="form-label" for="scale-res-input">Display Scaling (wm size / density):</label>
-              <div style="display:flex; gap:6px; margin-top:4px;">
-                <input type="text" id="scale-res-input" class="search-input" style="flex:1;" placeholder="1080x2400" title="Custom Resolution" aria-label="Custom Resolution">
-                <input type="text" id="scale-dpi-input" class="search-input" style="width:70px;" placeholder="420" title="Custom Density DPI" aria-label="Custom Density DPI">
+              <div class="flex-row gap-6 mt-4">
+                <input type="text" id="scale-res-input" class="search-input flex-1" placeholder="1080x2400" title="Custom Resolution" aria-label="Custom Resolution">
+                <input type="text" id="scale-dpi-input" class="search-input w-70" placeholder="420" title="Custom Density DPI" aria-label="Custom Density DPI">
                 <button class="btn btn-sm" onclick="applyDisplayScale()">Apply</button>
                 <button class="btn btn-sm btn-amber" onclick="resetDisplayScale()">Reset</button>
               </div>
@@ -1434,7 +1495,7 @@ footer {
       <div id="view-files" class="view-panel">
         <div class="card toolbar">
           <div>
-            <h3 class="view-header-title"><i class="fa-solid fa-box-archive" style="color:var(--accent-blue);"></i> APK Installer & Remote File Explorer</h3>
+            <h3 class="view-header-title"><i class="fa-solid fa-box-archive text-blue"></i> APK Installer & Remote File Explorer</h3>
             <p class="view-header-desc">Install APK bundles (.apk, .xapk, .apks), browse phone directories, or open native MTP.</p>
           </div>
           <div class="toolbar-actions">
@@ -1443,18 +1504,18 @@ footer {
         </div>
 
         <!-- Installation Options Checklist -->
-        <div class="card" style="padding:10px 14px; background:var(--bg-card-subtle); display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
-          <span style="font-weight:700; font-size:12px;">Install Flags:</span>
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px;">
+        <div class="card install-flags-bar">
+          <span class="font-bold text-sm">Install Flags:</span>
+          <label class="flex-row items-center gap-6 cursor-pointer text-sm">
             <input type="checkbox" id="inst-replace" checked title="Replace Existing (-r)" aria-label="Replace Existing"> Replace Existing (-r)
           </label>
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px;">
+          <label class="flex-row items-center gap-6 cursor-pointer text-sm">
             <input type="checkbox" id="inst-grant" checked title="Auto Grant Perms (-g)" aria-label="Auto Grant Perms"> Auto Grant Perms (-g)
           </label>
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px;">
+          <label class="flex-row items-center gap-6 cursor-pointer text-sm">
             <input type="checkbox" id="inst-downgrade" title="Allow Downgrade (-d)" aria-label="Allow Downgrade"> Allow Downgrade (-d)
           </label>
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px;">
+          <label class="flex-row items-center gap-6 cursor-pointer text-sm">
             <input type="checkbox" id="inst-test" title="Allow Test Packages (-t)" aria-label="Allow Test Packages"> Test Packages (-t)
           </label>
         </div>
@@ -1465,12 +1526,12 @@ footer {
           <i class="fa-solid fa-cloud-arrow-up dropzone-icon"></i>
           <div class="dropzone-title">Drop .apk, .xapk, or .apks files here to install</div>
           <div class="dropzone-sub">or click to browse your computer</div>
-          <input type="file" id="apk-file-input" multiple accept=".apk,.xapk,.apks" style="display:none;" onchange="handleFileSelect(event)" title="Choose APK files" aria-label="Choose APK files">
-          <div id="upload-status" style="margin-top:8px; font-weight:bold; color:var(--accent-blue);"></div>
+          <input type="file" id="apk-file-input" multiple accept=".apk,.xapk,.apks" class="d-none" onchange="handleFileSelect(event)" title="Choose APK files" aria-label="Choose APK files">
+          <div id="upload-status" class="upload-status-indicator"></div>
         </div>
 
         <!-- Remote Explorer Breadcrumbs & Toolbar -->
-        <div class="card toolbar" style="background:var(--bg-card-subtle);">
+        <div class="card toolbar bg-subtle">
           <div class="file-nav-bar">
             <button class="btn btn-sm" onclick="navigateUp()"><i class="fa-solid fa-arrow-up"></i> Up</button>
             <span class="text-bold">Path:</span>
@@ -1481,7 +1542,7 @@ footer {
           </div>
 
           <!-- Quick Paths Shortcuts -->
-          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+          <div class="flex-row gap-4 flex-wrap">
             <button class="btn btn-sm" onclick="navigateToPath('/sdcard')">📱 /sdcard</button>
             <button class="btn btn-sm" onclick="navigateToPath('/sdcard/Download')">📥 Download</button>
             <button class="btn btn-sm" onclick="navigateToPath('/sdcard/DCIM')">📷 DCIM</button>
@@ -1510,7 +1571,7 @@ footer {
       <!-- 7. RESCUE & UNBRICK VIEW -->
       <div id="view-rescue" class="view-panel">
         <div class="card">
-          <h3 class="view-header-title mb-6"><i class="fa-solid fa-life-ring" style="color:var(--accent-red);"></i> Hardware Recovery, Fastboot & Unbrick Wizard</h3>
+          <h3 class="view-header-title mb-6"><i class="fa-solid fa-life-ring text-red"></i> Hardware Recovery, Fastboot & Unbrick Wizard</h3>
           <p class="view-header-desc mb-14">Safe one-click boot target switches, partition flashers, bootloop repair & emergency recovery commands.</p>
           
           <div class="recovery-actions">
@@ -1521,19 +1582,19 @@ footer {
             <button class="btn btn-amber" onclick="rebootTarget('fastboot')"><i class="fa-solid fa-gear"></i> Reboot to Fastbootd</button>
           </div>
 
-          <hr style="border:none; border-top:1px solid var(--border); margin:18px 0;">
+          <hr class="section-divider">
 
           <!-- Root & Diagnostics -->
-          <div style="font-weight:700; margin-bottom:8px;">🔍 Root & Bootloader Diagnostics:</div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+          <div class="font-bold mb-8">🔍 Root & Bootloader Diagnostics:</div>
+          <div class="flex-row gap-8 flex-wrap mb-14">
             <button class="btn btn-sm btn-teal" onclick="runRootAction('diagnostic')"><i class="fa-solid fa-stethoscope"></i> Root Diagnostic</button>
             <button class="btn btn-sm btn-primary" onclick="runRootAction('one_click_root')"><i class="fa-solid fa-unlock"></i> 1-Click Root Assistant</button>
             <button class="btn btn-sm btn-primary" onclick="runRootAction('magisk')"><i class="fa-solid fa-cube"></i> Install Latest Magisk</button>
           </div>
 
           <!-- Emergency Bootloop Fixes -->
-          <div style="font-weight:700; margin-bottom:8px;">🛠 Automated Bootloop Repair Scripts:</div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+          <div class="font-bold mb-8">🛠 Automated Bootloop Repair Scripts:</div>
+          <div class="flex-row gap-8 flex-wrap mb-14">
             <button class="btn btn-sm btn-amber" onclick="runBootloopFix('safemode')">🛡 Safe Mode Boot</button>
             <button class="btn btn-sm btn-amber" onclick="runBootloopFix('rescue_party')">🔄 Reset RescueParty Loop</button>
             <button class="btn btn-sm btn-danger" onclick="runBootloopFix('magisk_remove')">🧩 Remove Magisk Modules</button>
@@ -1541,11 +1602,11 @@ footer {
             <button class="btn btn-sm" onclick="openMtp()">Force MTP USB Mode</button>
           </div>
 
-          <hr style="border:none; border-top:1px solid var(--border); margin:18px 0;">
+          <hr class="section-divider">
 
           <!-- Fastboot Partition Flasher -->
-          <div style="font-weight:700; margin-bottom:8px;">⚡ Fastboot Partition Manager & Flasher:</div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <div class="font-bold mb-8">⚡ Fastboot Partition Manager & Flasher:</div>
+          <div class="flex-row gap-8 flex-wrap items-center">
             <button class="btn btn-sm" onclick="runFastboot('getvar')">📋 Read Fastboot Info & Slot</button>
             <button class="btn btn-sm" onclick="runFastboot('switch_slot_a')">🅰 Switch Slot -> A</button>
             <button class="btn btn-sm" onclick="runFastboot('switch_slot_b')">🅱 Switch Slot -> B</button>
@@ -1559,7 +1620,7 @@ footer {
       <div id="view-terminal" class="view-panel">
         <div class="card toolbar">
           <div>
-            <h3 class="view-header-title"><i class="fa-solid fa-terminal" style="color:var(--accent-blue);"></i> Interactive Terminal & Real-Time Logcat</h3>
+            <h3 class="view-header-title"><i class="fa-solid fa-terminal text-blue"></i> Interactive Terminal & Real-Time Logcat</h3>
             <p class="view-header-desc">Direct ADB shell session with history, Logcat streaming and diagnostics.</p>
           </div>
           <div class="toolbar-actions">
@@ -1569,13 +1630,13 @@ footer {
           </div>
         </div>
 
-        <div class="card" style="flex:1; display:flex; flex-direction:column; padding:0; overflow:hidden; background:var(--terminal-bg);">
-          <div id="terminal-view-body" class="terminal-body" style="height:440px;">
+        <div class="card terminal-card-wrap">
+          <div id="terminal-view-body" class="terminal-body terminal-view-h">
 [SYSTEM] Interactive ADB Shell Terminal Ready.
 [SYSTEM] Type any command (e.g. 'getprop', 'pm list packages', 'dumpsys battery') below.
           </div>
           <div class="terminal-input-bar">
-            <span style="color:#38BDF8; font-weight:bold; font-family:var(--font-mono); font-size:13px;">$</span>
+            <span class="mono-prompt">$</span>
             <input type="text" id="terminal-main-input" class="terminal-input" placeholder="Enter shell command..." onkeydown="if(event.key==='Enter') runMainTerminalCommand()" title="Terminal Command" aria-label="Terminal Command">
             <button class="btn btn-sm btn-primary" onclick="runMainTerminalCommand()">Run</button>
           </div>
@@ -1587,11 +1648,11 @@ footer {
         <div class="chat-container">
           <div class="chat-pane">
             <div class="chat-header">
-              <div style="display:flex; align-items:center; gap:8px;">
-                <i class="fa-solid fa-brain" style="color:var(--accent-purple);"></i>
+              <div class="flex-row items-center gap-8">
+                <i class="fa-solid fa-brain text-purple"></i>
                 <span class="chat-header-title">Gemma 4B Conversational Copilot & Action Engine</span>
               </div>
-              <div style="display:flex; gap:8px;">
+              <div class="flex-row gap-8">
                 <button id="btn-toggle-model" class="btn btn-sm btn-success" onclick="toggleAIModel()"><i class="fa-solid fa-play"></i> Start Model</button>
                 <button class="btn btn-sm" onclick="openLocalFolder('models')" title="Open Models Folder"><i class="fa-solid fa-folder"></i> Models</button>
               </div>
@@ -1605,7 +1666,7 @@ footer {
             </div>
 
             <!-- Quick Action Prompt Pills -->
-            <div style="display:flex; gap:6px; padding:8px 14px; background:var(--bg-card-subtle); border-top:1px solid var(--border); overflow-x:auto;">
+            <div class="input-subtle-wrap">
               <button class="btn btn-sm" onclick="sendQuickPrompt('Scan bloatware on this phone')">🔍 Scan Bloatware</button>
               <button class="btn btn-sm" onclick="sendQuickPrompt('Check battery health and charging status')">🔋 Battery Health</button>
               <button class="btn btn-sm" onclick="sendQuickPrompt('Trim RAM and optimize background processes')">🧠 Trim RAM</button>
@@ -1625,7 +1686,7 @@ footer {
       <div id="view-journal" class="view-panel">
         <div class="card toolbar">
           <div>
-            <h3 class="view-header-title"><i class="fa-solid fa-clock-rotate-left" style="color:var(--accent-blue);"></i> Mutation Safety Journal</h3>
+            <h3 class="view-header-title"><i class="fa-solid fa-clock-rotate-left text-blue"></i> Mutation Safety Journal</h3>
             <p class="view-header-desc">Atomic SQLite rollback ledger. 1-Click undo for all uninstalled or disabled applications.</p>
           </div>
           <button class="btn btn-sm" onclick="loadJournal()"><i class="fa-solid fa-arrows-rotate"></i> Refresh</button>
@@ -1651,25 +1712,25 @@ footer {
       <!-- 11. SETTINGS & TOOLS VIEW -->
       <div id="view-settings" class="view-panel">
         <div class="card settings-card">
-          <h3 class="view-header-title"><i class="fa-solid fa-gear" style="color:var(--accent-blue);"></i> Application Settings & Diagnostics</h3>
+          <h3 class="view-header-title"><i class="fa-solid fa-gear text-blue"></i> Application Settings & Diagnostics</h3>
           <p class="view-header-desc">Engineered for zero-lag performance with atomic SQLite WAL storage in <code>data/appcontrol.db</code>.</p>
           
-          <div style="display:flex; flex-direction:column; gap:8px;">
+          <div class="flex-col gap-8">
             <label class="form-label" for="cfg-theme">User Interface Theme:</label>
-            <select id="cfg-theme" class="select-device" onchange="toggleTheme()" title="Select Theme" aria-label="Select Theme" style="border:1px solid var(--border); padding:6px 10px; border-radius:6px; max-width:300px;">
+            <select id="cfg-theme" class="select-device select-theme-box" onchange="toggleTheme()" title="Select Theme" aria-label="Select Theme">
               <option value="dark">Dark Theme (Fintech Obsidian)</option>
               <option value="light">Light Theme</option>
             </select>
           </div>
 
-          <div style="display:flex; flex-direction:column; gap:8px;">
+          <div class="flex-col gap-8">
             <label class="form-label">Database Persistence Engine:</label>
             <div class="db-status-ok"><i class="fa-solid fa-circle-check"></i> SQLite 3 WAL Mode Active (data/appcontrol.db)</div>
           </div>
 
-          <div style="display:flex; flex-direction:column; gap:8px;">
+          <div class="flex-col gap-8">
             <label class="form-label">Engine & ADB Service Management:</label>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <div class="flex-row gap-8 flex-wrap">
               <button class="btn btn-sm btn-primary" onclick="restartAdb()"><i class="fa-solid fa-rotate"></i> Restart ADB Daemon</button>
               <button class="btn btn-sm" onclick="backupAllApks()"><i class="fa-solid fa-box"></i> Backup All User Apps</button>
               <button class="btn btn-sm" onclick="openLocalFolder('backups')"><i class="fa-solid fa-folder"></i> Open Backups Folder</button>
@@ -1685,7 +1746,7 @@ footer {
     <div id="live-console">
       <div class="console-header">
         <span class="console-header-title">⚡ LIVE ACTIVITY</span>
-        <div style="display:flex; gap:4px;">
+        <div class="flex-row gap-4">
           <button class="btn btn-sm" onclick="copyConsole()" title="Copy Logs"><i class="fa-solid fa-copy"></i></button>
           <button class="btn btn-sm" onclick="clearConsole()" title="Clear Logs"><i class="fa-solid fa-trash-can"></i></button>
           <button class="btn btn-sm" onclick="toggleConsole()" title="Toggle Dock"><i class="fa-solid fa-chevron-right"></i></button>
@@ -1698,7 +1759,7 @@ footer {
       </div>
 
       <div class="terminal-input-bar">
-        <span style="color:#38BDF8; font-weight:bold; font-family:var(--font-mono); font-size:13px;">$</span>
+        <span class="mono-prompt">$</span>
         <input type="text" id="terminal-cmd-input" class="terminal-input" placeholder="adb shell command..." onkeydown="if(event.key==='Enter') runQuickCommand()" title="Terminal Command Input" aria-label="Terminal Command Input">
         <button class="btn btn-sm btn-primary" onclick="runQuickCommand()">Run</button>
       </div>
@@ -1708,10 +1769,10 @@ footer {
 
   <!-- FOOTER STATUS BAR (MATCHING OLD APP FOOTER) -->
   <footer>
-    <div id="footer-status" style="display:flex; align-items:center; gap:8px;">
-      <span style="color:#10B981;">●</span> <span id="footer-status-text">Ready</span>
+    <div id="footer-status" class="flex-row items-center gap-8">
+      <span class="text-success">●</span> <span id="footer-status-text">Ready</span>
     </div>
-    <div id="footer-device" style="font-weight:600; color:var(--text-secondary);">
+    <div id="footer-device" class="font-semibold text-secondary">
       ● No Device Connected
     </div>
   </footer>
@@ -1722,7 +1783,7 @@ footer {
   <div id="specs-modal" class="modal-backdrop">
     <div class="modal-card">
       <div class="modal-header">
-        <span><i class="fa-solid fa-circle-info" style="color:var(--accent-teal);"></i> Device Hardware Specifications</span>
+        <span><i class="fa-solid fa-circle-info text-teal"></i> Device Hardware Specifications</span>
         <button class="btn btn-sm" onclick="closeSpecsModal()">✖</button>
       </div>
       <div class="modal-body">
@@ -1742,7 +1803,7 @@ footer {
   <div id="wireless-modal" class="modal-backdrop">
     <div class="modal-card">
       <div class="modal-header">
-        <span><i class="fa-solid fa-wifi" style="color:var(--accent-blue);"></i> Connect Wireless Debugging</span>
+        <span><i class="fa-solid fa-wifi text-blue"></i> Connect Wireless Debugging</span>
         <button class="btn btn-sm" onclick="closeWirelessModal()">✖</button>
       </div>
       <div class="modal-body">
